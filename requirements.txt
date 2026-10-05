@@ -1,0 +1,14 @@
+numpy<2.0.0
+gymnasium==0.28.1
+torch>=2.0.0
+torchvision
+scipy
+cvxpy
+pandas
+scikit-learn
+pyyaml
+simplejson
+platformdirs
+requests
+matplotlib
+pytest

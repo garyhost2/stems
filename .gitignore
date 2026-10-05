@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Run logs, plots and trained model checkpoints
+logs/
+run_logs/
+plots/
+checkpoints/
+results/**/*_model/
+
+# Scratch result directories
+results/smoke_*/
+results/check_*/
+
+# Schemas are generated for the local CityLearn data folder by the setup_citylearn_*.py scripts
+citylearn_schemas/*/schema.json
+citylearn_schemas/_subsets/
+
+# CityLearn source checkout created by setup_citylearn.sh
+third_party/
