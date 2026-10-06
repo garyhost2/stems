@@ -1,8 +1,39 @@
 from __future__ import annotations
 
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 
 import numpy as np
+
+
+def _bisect_toward_zero(f, target: np.ndarray, lo: np.ndarray, hi: np.ndarray,
+                        iters: int = 40, tol: float = 1e-9) -> np.ndarray:
+    """Smallest-magnitude ``a`` in ``[lo, hi]`` with ``f(a) == target``, ``f`` non-decreasing.
+
+    Bisects on the side of zero the target lies on, so a target that idling already
+    achieves returns exactly zero rather than an arbitrary point of a flat region. An
+    unreachable target clamps to the nearer endpoint.
+    """
+    zero = np.zeros_like(lo)
+    at_zero = f(zero)
+    need_up = target > at_zero + tol
+    need_down = target < at_zero - tol
+
+    left_up, right_up = zero.copy(), hi.copy()
+    for _ in range(iters):
+        mid = 0.5 * (left_up + right_up)
+        below = f(mid) < target
+        left_up = np.where(below, mid, left_up)
+        right_up = np.where(below, right_up, mid)
+
+    left_dn, right_dn = lo.copy(), zero.copy()
+    for _ in range(iters):
+        mid = 0.5 * (left_dn + right_dn)
+        above = f(mid) > target
+        right_dn = np.where(above, mid, right_dn)
+        left_dn = np.where(above, left_dn, mid)
+
+    out = np.where(need_up, right_up, np.where(need_down, left_dn, zero))
+    return np.clip(out, lo, hi).astype(np.float64)
 
 
 class BatteryModel:
@@ -75,6 +106,34 @@ class BatteryModel:
     def accepted_kwh(self, soc: np.ndarray, action: np.ndarray) -> np.ndarray:
         return self._step(soc, action)[1]
 
+    def action_for_soc(self, soc: np.ndarray, target: np.ndarray,
+                       a_max: float = 1.0, iters: int = 40) -> np.ndarray:
+        """Smallest-magnitude action that drives ``soc`` to ``target`` in one step.
+
+        ``next_soc`` is non-decreasing in the action, so each side is a bisection on the
+        exact model; an unreachable target clamps to the nearest endpoint. The
+        model-predictive controller plans in state of charge and converts here, which
+        makes its state trajectory exact instead of a linearisation of one -- the
+        battery saturates as it fills, so a secant between the idle and full-charge
+        corners understates the state of charge in between by up to 0.11 on this
+        schema's devices, and the controller would then plan trajectories that leave
+        the band it is supposed to respect.
+
+        *Smallest magnitude* is load-bearing, not a tie-break nicety. ``next_soc`` is
+        flat in the action wherever the device cannot move energy -- a battery already
+        at its floor cannot discharge further, a tank with no draw cannot discharge at
+        all -- and a plain bisection over the whole interval converges to whichever end
+        of the flat region it started from, which is a full-power command that happens
+        to change nothing in the model and a great deal in the plant's accounting.
+        Bracketing around zero returns the idle command instead, which is the one that
+        means what it says.
+        """
+        soc = np.asarray(soc, dtype=np.float64)
+        target = np.broadcast_to(np.asarray(target, dtype=np.float64), soc.shape)
+        return _bisect_toward_zero(lambda a: self.next_soc(soc, a), target,
+                                   np.full(soc.shape, -a_max, dtype=np.float64),
+                                   np.full(soc.shape, a_max, dtype=np.float64), iters)
+
     def safe_interval(self, soc: np.ndarray, lo: np.ndarray, hi: np.ndarray,
                       a_max: float = 1.0, iters: int = 24) -> Tuple[np.ndarray, np.ndarray]:
         soc = np.asarray(soc, dtype=np.float64)
@@ -132,7 +191,15 @@ class TankModel:
                    loss=[b.dhw_storage.loss_coefficient for b in buildings],
                    hours_per_step=seconds_per_time_step / 3600.0)
 
-    def drawn_kwh(self, soc: np.ndarray, action: np.ndarray, demand: np.ndarray) -> np.ndarray:
+    def _step(self, soc: np.ndarray, action: np.ndarray, demand: np.ndarray):
+        """Shared core of ``drawn_kwh`` and ``next_soc``.
+
+        Returns ``(electricity_kwh, stored_energy_kwh)``: the heater electricity the
+        storage exchange costs (positive when charging, negative when discharging saves
+        the heater work) and the tank energy content after the step. Factored out so the
+        two public methods cannot drift apart -- the model-predictive controller needs
+        both and they must describe the same tank.
+        """
         soc = np.asarray(soc, dtype=np.float64)
         e = np.asarray(action, dtype=np.float64) * self.capacity * self.dt
         demand = np.maximum(np.asarray(demand, dtype=np.float64), 0.0)
@@ -143,6 +210,41 @@ class TankModel:
         stored = np.minimum(e_init + heat_in * r, C) - e_init
         charge = np.maximum(stored, 0.0) / r / self.heater_efficiency
         heat_out = np.minimum(np.maximum(-e, 0.0), demand)
-        e_final = np.maximum(e_init - heat_out / np.maximum(r, 1e-9), 0.0)
-        discharge = (e_init - e_final) * r / self.heater_efficiency
-        return np.where(e >= 0.0, charge, -discharge)
+        e_discharged = np.maximum(e_init - heat_out / np.maximum(r, 1e-9), 0.0)
+        discharge = (e_init - e_discharged) * r / self.heater_efficiency
+        electricity = np.where(e >= 0.0, charge, -discharge)
+        content = np.where(e >= 0.0, e_init + np.maximum(stored, 0.0), e_discharged)
+        return electricity, content
+
+    def drawn_kwh(self, soc: np.ndarray, action: np.ndarray, demand: np.ndarray) -> np.ndarray:
+        return self._step(soc, action, demand)[0]
+
+    def next_soc(self, soc: np.ndarray, action: np.ndarray, demand: np.ndarray) -> np.ndarray:
+        """State of charge after one step, same convention as ``BatteryModel.next_soc``.
+
+        ``drawn_kwh`` already simulated the tank internally and then threw the state
+        away; a receding-horizon controller has to propagate it, so it is returned here
+        from the same arithmetic rather than from a second implementation.
+        """
+        return self._step(soc, action, demand)[1] / np.maximum(self.capacity, 1e-12)
+
+    def action_for_soc(self, soc: np.ndarray, target: np.ndarray, demand: np.ndarray,
+                       a_max: Optional[np.ndarray] = None, iters: int = 40) -> np.ndarray:
+        """Smallest-magnitude tank action that drives ``soc`` to ``target``.
+
+        Same role, and the same zero-bracketing, as ``BatteryModel.action_for_soc``.
+        The tank makes the flat-region problem acute: ``next_soc`` discharges only as
+        far as the hot-water draw allows, so with no draw it is *constant* for every
+        non-positive action, and a bisection over the whole interval returns -1 -- a
+        full discharge command, issued at every step, for a tank that cannot discharge.
+        ``a_max`` is the schema's own upper bound on the hot-water action, which differs
+        per building.
+        """
+        soc = np.asarray(soc, dtype=np.float64)
+        target = np.broadcast_to(np.asarray(target, dtype=np.float64), soc.shape)
+        hi_bound = (np.ones_like(soc) if a_max is None
+                    else np.broadcast_to(np.asarray(a_max, dtype=np.float64), soc.shape))
+        return _bisect_toward_zero(lambda a: self.next_soc(soc, a, demand), target,
+                                   np.full(soc.shape, -1.0, dtype=np.float64),
+                                   np.ascontiguousarray(hi_bound, dtype=np.float64),
+                                   iters)
