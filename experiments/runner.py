@@ -58,6 +58,109 @@ def code_fingerprint() -> Dict[str, Any]:
             "citylearn": cl_version}
 
 
+def _hash_file(h, label: str, path: Path, normalise_newlines: bool = False) -> bool:
+    if not path.is_file():
+        return False
+    data = path.read_bytes()
+    if normalise_newlines:
+        # Line-ending drift is not a data change (audit E2), so it must not change the
+        # fingerprint; the charger CSVs demonstrably flip between CRLF and LF.
+        data = data.replace(b"\r\n", b"\n")
+    h.update(label.encode())
+    h.update(data)
+    return True
+
+
+def data_fingerprint(schema_path: Optional[str]) -> Dict[str, Any]:
+    """Hash the *experiment*, not just the code (audit E1).
+
+    ``code_fingerprint`` hashes ``stems/*.py`` and ``experiments/*.py`` only. It does not
+    cover the resolved schema JSON (gitignored, regenerated per machine), the electric
+    vehicle charger CSVs, the ResStock building time series the schema points at, the
+    price and carbon series, the learned dynamics checkpoints, the pinned dependency set
+    or the CityLearn version. Two records could therefore carry the same ``fingerprint``
+    and be different experiments.
+
+    This adds a second, independent digest over the data side. It is reported alongside
+    ``fingerprint`` rather than folded into it, because 400+ stored records already carry
+    that field and silently changing its meaning would make them incomparable with each
+    other as well as with new ones.
+
+    The schema JSON is hashed with ``root_directory`` removed and its keys sorted, so the
+    digest tracks the experiment and not the absolute install path -- the same schema on
+    two machines gives the same digest.
+
+    Known gap, stated rather than hidden: ``requirements.lock.txt`` is hashed, but the
+    actually-installed package versions are not resolved and compared against it.
+    """
+    import hashlib
+
+    h = hashlib.sha256()
+    covered: List[str] = []
+    missing: List[str] = []
+
+    try:
+        import citylearn
+        cl_version = getattr(citylearn, "__version__", "unknown")
+    except Exception:
+        cl_version = "unavailable"
+    h.update(f"citylearn={cl_version}".encode())
+
+    if _hash_file(h, "requirements.lock.txt", REPO / "requirements.lock.txt"):
+        covered.append("requirements.lock.txt")
+    else:
+        missing.append("requirements.lock.txt")
+
+    resolved = Path(schema_path) if schema_path else None
+    if resolved is not None and resolved.is_file():
+        import json as _json
+
+        try:
+            doc = _json.loads(resolved.read_text())
+        except Exception:
+            doc = None
+        if isinstance(doc, dict):
+            root = doc.get("root_directory")
+            portable = {k: v for k, v in doc.items() if k != "root_directory"}
+            h.update(b"schema.json")
+            h.update(_json.dumps(portable, sort_keys=True, separators=(",", ":")).encode())
+            covered.append(resolved.name)
+
+            # Every data file the included buildings actually read.
+            root_dir = Path(root) if root else resolved.parent
+            refs = set()
+            for cfg in (doc.get("buildings") or {}).values():
+                if not isinstance(cfg, dict) or not cfg.get("include"):
+                    continue
+                for key in ("energy_simulation", "weather", "carbon_intensity",
+                            "pricing", "pv"):
+                    value = cfg.get(key)
+                    if isinstance(value, str):
+                        refs.add(value)
+                dynamics = cfg.get("dynamics")
+                if isinstance(dynamics, dict):
+                    for value in (dynamics.get("attributes") or {}).values():
+                        if isinstance(value, str) and value.endswith(".pth"):
+                            refs.add(value)
+            for ref in sorted(refs):
+                path = Path(ref) if Path(ref).is_absolute() else root_dir / ref
+                if _hash_file(h, ref, path):
+                    covered.append(ref)
+                else:
+                    missing.append(ref)
+
+        for csv_path in sorted(resolved.parent.glob("charger_*.csv")):
+            if _hash_file(h, csv_path.name, csv_path, normalise_newlines=True):
+                covered.append(csv_path.name)
+    elif schema_path:
+        missing.append(str(schema_path))
+
+    return {"data_fingerprint": h.hexdigest()[:16],
+            "data_files": len(covered),
+            "data_missing": sorted(missing),
+            "citylearn": cl_version}
+
+
 def make_config(scenario, learner: Optional[Dict[str, Any]] = None):
     from stems.config import CBFConfig, STEMSConfig
 
@@ -316,6 +419,7 @@ def run_one(spec: Dict[str, Any]) -> Dict[str, Any]:
         "scenario": scenario.describe(), "arm": asdict(arm), "seed": seed,
         "episodes": episodes if arm.learns else 0, "learner": learner if arm.learns else {},
         "code": code_fingerprint(),
+        "data": data_fingerprint(scenario.schema_path()),
         "started": time.strftime("%Y-%m-%d %H:%M:%S")}}
 
     try:

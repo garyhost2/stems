@@ -331,8 +331,16 @@ class STEMSEnvironment:
                 "for synthetic smoke tests only."
             )
         schema = self._resolve_schema(requested_schema)
+        # Audit E3: the seed used to reach torch, numpy and python but never CityLearn,
+        # so `seed` did not seed the simulator. Harmless while the simulation is
+        # deterministic given the schema, but a stochastic element -- a randomised EV
+        # schedule, a stochastic occupancy model, CityLearn's own random episode split --
+        # would have been unreproducible and the run record would not have said so. An
+        # explicit random_seed in env_kwargs still wins.
+        kwargs = dict(self._env_kwargs)
+        kwargs.setdefault("random_seed", int(self._seed))
         try:
-            return CityLearnEnv(schema=schema, central_agent=False, **self._env_kwargs)
+            return CityLearnEnv(schema=schema, central_agent=False, **kwargs)
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to construct real CityLearn env from schema {schema!r}: {exc!r}. "

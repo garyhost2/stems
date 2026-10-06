@@ -411,3 +411,72 @@ exactly from `peak_import_kw` (idle 35.1, idle+calibrated 35.2, rule 45.1,
 rule+calibrated 45.1, RL 41.4), while the corresponding `avg_daily_peak` means are
 23.5, 23.6, 26.9, 26.9 and 21.1. The 213 stored run records that carry both KPIs remain
 valid and comparable with current code.
+
+---
+
+## Step 5 — Repair provenance and seeding (audit E3, E1)
+
+### 5.1 The seed now reaches CityLearn
+
+**What.** `STEMSEnvironment._build_real_env` passes `random_seed=self._seed` to
+`CityLearnEnv`. An explicit `random_seed` in `env_kwargs` still wins.
+
+**Why.** `__init__` stored `self._seed` and used it only for the mock; the real
+`CityLearnEnv` was constructed without it (audit E3), so "seed" seeded torch, numpy and
+python and not the simulator. Harmless while the simulation is deterministic given the
+schema, but a stochastic element — a randomised EV schedule, a stochastic occupancy
+model, CityLearn's own `random_episode_split` — would have been unreproducible, and the
+run record would not have said so.
+
+**Evidence.** `tests/test_provenance.py::test_the_seed_reaches_citylearn` asserts
+`env._env.random_seed == 4321` for `STEMSEnvironment(seed=4321)`;
+`test_an_explicit_random_seed_in_env_kwargs_wins` pins the override.
+`CityLearnEnv.__init__` does accept `random_seed: int = None`, checked by
+`inspect.signature` on the installed 2.6.0b1.
+
+### 5.2 A second, data-side fingerprint
+
+**What.** New `experiments/runner.py::data_fingerprint(schema_path)`, recorded as
+`record["meta"]["data"]` alongside the existing `record["meta"]["code"]`. It digests:
+
+- the CityLearn version string;
+- `requirements.lock.txt`;
+- the resolved schema JSON, **with `root_directory` removed and keys sorted**, so the
+  digest tracks the experiment rather than the absolute install path;
+- every data file the *included* buildings actually read — the ResStock energy-simulation
+  CSVs, `weather.csv`, the price and carbon series, and the learned `.pth` dynamics
+  checkpoints;
+- the electric-vehicle `charger_*.csv` files beside the schema, hashed with CRLF
+  normalised to LF so the line-ending drift of audit E2 cannot move the digest.
+
+For `citylearn_schemas/tx_travis_8b/schema.json` this covers 20 files (7.5 MB, about
+15 ms) and reports `data_missing: []`.
+
+**Why a second field rather than a wider one.** More than 400 stored records already
+carry `meta.code.fingerprint`. Changing what that field hashes would make every old
+record incomparable with every new one *and* with each other, since nothing in a record
+says which definition produced it. Adding `meta.data.data_fingerprint` leaves the old
+field's meaning intact: an old record simply has no data digest, which is honest and
+detectable. `code_fingerprint()`'s return keys are pinned by a test for the same reason.
+
+**Why it was needed.** `code_fingerprint` hashes `stems/*.py` and `experiments/*.py` only.
+It did not cover the schema JSON (gitignored, regenerated per machine), the charger CSVs,
+the building time series, the dependency lock or anything but the CityLearn version
+string, so two records with the same `fingerprint` could be different experiments
+(audit E1).
+
+**Evidence.** `tests/test_provenance.py`, 11 cases, all passing:
+`test_two_different_schemas_get_different_data_fingerprints` builds a 7-building variant
+of the 8-building schema and shows the code fingerprint is identical while the data
+fingerprint differs — the exact failure E1 names;
+`test_the_fingerprint_does_not_depend_on_the_install_path`;
+`test_charger_csvs_enter_the_fingerprint_but_line_endings_do_not` (CRLF conversion leaves
+the digest alone, a one-cell edit moves it);
+`test_a_missing_data_file_is_reported_not_swallowed`;
+`test_data_fingerprint_survives_a_missing_schema`;
+`test_the_original_code_fingerprint_field_is_untouched`.
+
+**Known gap, stated not hidden.** `requirements.lock.txt` is hashed, but the
+actually-installed package versions are not resolved and compared against it, so an
+environment that drifts from the lock file is not detected. Recorded in the function's
+docstring.
