@@ -7,6 +7,28 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+def normalised_adjacency(adj: torch.Tensor) -> torch.Tensor:
+    r"""Symmetrically normalised adjacency with self-loops, :math:`\hat{D}^{-1/2}
+    (A + I) \hat{D}^{-1/2}`.
+
+    Cached on the tensor object: the adjacency is fixed for a run (it is built once from
+    the building graph), but this was recomputed inside every one of the three GCN
+    layers, for every sample, inside the Python loop over the batch.
+    """
+    cached = getattr(adj, "_stems_norm_cache", None)
+    if cached is not None and cached.shape == adj.shape and cached.device == adj.device:
+        return cached
+    B = adj.size(0)
+    adj_hat = adj + torch.eye(B, device=adj.device, dtype=adj.dtype)
+    d_inv_sqrt = adj_hat.sum(dim=1).pow(-0.5)
+    norm = d_inv_sqrt.unsqueeze(1) * adj_hat * d_inv_sqrt.unsqueeze(0)
+    try:
+        adj._stems_norm_cache = norm
+    except AttributeError:
+        pass
+    return norm
+
+
 class GCNConv(nn.Module):
     def __init__(self, in_channels: int, out_channels: int, bias: bool = True) -> None:
         super().__init__()
@@ -15,15 +37,13 @@ class GCNConv(nn.Module):
         nn.init.xavier_uniform_(self.weight)
 
     def forward(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
-        B = adj.size(0)
-        device = adj.device
-        adj_hat = adj + torch.eye(B, device=device)
+        """``x`` is (B, C) for one time step or (N, B, C) for a batch of N of them.
 
-        deg = adj_hat.sum(dim=1)
-        d_inv_sqrt = torch.diag(deg.pow(-0.5))
-        adj_norm = d_inv_sqrt @ adj_hat @ d_inv_sqrt
-
-        out = adj_norm @ x @ self.weight
+        ``adj_norm @ x`` broadcasts over the leading batch axis in both cases, so the
+        same code path serves the single-step and the batched call; there is no Python
+        loop over the batch (audit F).
+        """
+        out = normalised_adjacency(adj) @ x @ self.weight
         if self.bias_param is not None:
             out = out + self.bias_param
         return out
@@ -153,9 +173,12 @@ class STEncoder(nn.Module):
         z_flat = self.temporal_transformer(hist_flat)
         z_nb = z_flat.view(N, B, -1)
 
-        h_nb = torch.zeros(N, B, self.spatial_gcn.out_dim, device=x_nb.device)
-        for n in range(N):
-            h_nb[n] = self.spatial_gcn(x_nb[n], adj)
+        # Audit F: this was a Python loop `for n in range(N): h_nb[n] =
+        # self.spatial_gcn(x_nb[n], adj)`, N separate three-layer GCN calls per update,
+        # each of which also rebuilt the normalised adjacency. The GCN is linear in the
+        # node axis and the adjacency is shared, so the whole batch is one set of matmuls
+        # on an (N, B, C) tensor. Numerically identical, not an approximation.
+        h_nb = self.spatial_gcn(x_nb, adj)
 
         r_nb = self.W_s(h_nb) + self.W_t(z_nb)
         return r_nb
