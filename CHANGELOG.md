@@ -1800,9 +1800,15 @@ Three findings came out of measuring rather than quoting.
 * `stems/cbf.py` — `_apply_shared_power_allocation` (42 lines) deleted;
   `_apply_deadline_barriers` and `feasibility_report` now delegate to
   `CBFShield.portfolio`, a `FlexibilityPortfolio` built per call from the public
-  `deadline_barriers` list. Per call, not cached: `experiments/controllers.py` and
-  several tests append to that list after construction, and a cached portfolio would
-  enforce a stale set — the failure mode a safety layer least wants.
+  `deadline_barriers` list. Per call, not cached: that list is a public attribute and
+  tests append to it after construction (`tests/test_flexibility.py::
+  test_appending_a_barrier_after_construction_still_reaches_the_shield`), so a cached
+  portfolio would enforce a stale set — the failure mode a safety layer least wants.
+  *(Correction, same session: an earlier draft of this entry said
+  `experiments/controllers.py` also appends after construction. It does not — it passes
+  `deadline_barriers=comfort or None` as a constructor argument at lines 740 and 774
+  and never mutates the list. The design decision stands on the attribute being public
+  and the tests exercising it; the production-code claim was wrong and is withdrawn.)*
 * `stems/__init__.py` — exports the framework and declares `FRAMEWORK_EXPORTS`.
 
 **Why.** The four loads were four construction sites: `EVReadinessBarrier` built in

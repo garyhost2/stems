@@ -70,10 +70,12 @@ class CBFShield:
         """The deadline loads this shield enforces, as the framework object.
 
         Built per call from ``self.deadline_barriers`` rather than cached, because that
-        list is public and callers append to it after construction
-        (``experiments/controllers.py`` does, and so do several tests). A cached
-        portfolio would silently enforce a stale set, which is the failure mode a
-        safety layer least wants.
+        list is a public attribute and callers may append to it after construction --
+        ``tests/test_flexibility.py`` does, and relies on the appended barrier being
+        enforced. (``experiments/controllers.py`` does *not*: it passes
+        ``deadline_barriers=`` as a constructor argument and never mutates the list.)
+        A cached portfolio would silently enforce a stale set, which is the failure
+        mode a safety layer least wants.
 
         The cap is passed at projection time, not stored here: ``grid_cap()`` depends
         on the safety configuration's derate, which is also mutable.
