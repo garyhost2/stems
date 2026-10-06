@@ -276,3 +276,118 @@ different amount of constraint pressure depending on the spread of the cost adva
 That is what 3.3 fixes and what the invariance tests measure. The λ-trajectory test is
 kept as a regression guard so a future change to `_update_lambdas` cannot introduce a
 reward-scale dependence unnoticed, and its docstring says exactly this.
+
+---
+
+## Reproducibility hazard noted, not fixed (out of scope for this track)
+
+**Fifteen tests silently convert a network failure into a skip.** `test_env_widening.py`
+(10) and `test_ev_real.py` (5) wrap environment construction in `except ... pytest.skip`.
+`STEMSEnvironment._resolve_schema` falls through to
+`citylearn.data.DataSet().get_dataset_names()`, which calls `api.github.com`. On a shared
+or rate-limited egress address that returns
+
+```
+403 API rate limit exceeded for <egress ip>
+```
+
+and `_resolve_schema` catches it and reports "schema not found" — **even when the dataset
+is present on disk**, which it is: all four datasets are in `.citylearn_cache/`. Observed
+directly in this session: the same tree gave 0 skips when the quota was intact and 15
+skips once it was exhausted, with no code change in between.
+
+The consequence is that an offline or rate-limited CI run reports all-green while 5% of
+the suite never executed, and that 5% is exactly the EV-schema and
+heterogeneous-observation coverage — the padding and charger-discovery logic the EV
+results depend on.
+
+Two defensible fixes, **deliberately not implemented here** because they change test
+semantics and this track must not touch the test contract: resolve a cached dataset from
+disk before ever consulting the GitHub API, and make the skip loud (or a failure) when the
+data is in fact present locally.
+
+---
+
+## Step 4 — Unify the district-import definition (audit B5)
+
+### 4.1 `avg_daily_peak` and `ramping_rate` now use the positive-part sum
+
+**What.** `MetricsCalculator.compute_all` computed a single series
+
+```python
+total_net = net.sum(axis=1)          # signed: one building's export offsets another's import
+```
+
+and used it for `avg_daily_peak` and `ramping_rate`, while `peak_import_kw`,
+`cap_exceedance_kwh` and `grid_violation_rate` used
+
+```python
+grid_series = np.maximum(net, 0.0).sum(axis=1)   # positive part
+```
+
+There is now one series, the positive-part one, used by all five.
+
+**Why.** Writing `e_bt` for building b's net electricity consumption at step t, the
+district import is `G_t = sum_b max(e_bt, 0)`. The signed alternative `sum_b e_bt` lets
+one house's PV export cancel another's import, which no physical path in the model
+permits. More to the point, the CBF (`_apply_power_guard`, `_apply_hvac_power_guard`),
+the fleet shield and the reward's grid term all enforce the positive-part definition, so
+the headline "average daily peak" was not the quantity any constraint in the repository
+controls (audit B5).
+
+**Evidence (tests).** Four new cases in `tests/test_kpis.py`, alongside the
+`test_exports_do_not_offset_another_buildings_import_for_peak` that already pinned the
+convention for `peak_import_kw`:
+`..._for_avg_daily_peak`, `..._for_ramping_rate`,
+`test_every_grid_side_kpi_uses_the_same_import_series` (one worked example where peak 10,
+avg daily peak 10, ramping 4.5, cap exceedance 7 kWh and violation rate 2/3 all follow
+from the same `G = (10, 4, 7)`), and `test_the_two_definitions_still_agree_when_nobody_exports`.
+22 of 22 pass.
+
+**Evidence (magnitude).** Idle rollouts on the real Travis 8-building schema, so the net
+series is the simulator's own:
+
+| window | hours with ≥1 exporter | `avg_daily_peak` signed → positive | `ramping_rate` signed → positive | `peak_import_kw` |
+|---|---|---|---|---|
+| summer, 14 d | 50.7% | 12.183 → 12.382 kW (+1.63%) | 4.991 → 1.853 kW (**−62.9%**) | 18.989 kW, unchanged |
+| winter, 14 d | 37.3% | 19.281 → 19.281 kW (0.00%) | 4.990 → 2.750 kW (**−44.9%**) | 39.634 kW, unchanged |
+| full year | 43.7% | 14.919 → 14.947 kW (+0.18%) | 4.810 → 2.257 kW (**−53.1%**) | 39.634 kW, unchanged |
+
+`avg_daily_peak` barely moves because the hour that sets a day's peak is usually an hour
+in which nobody is exporting. `ramping_rate` roughly halves, because the signed sum
+swings through the PV midday while the import series does not: most of what the old
+ramping metric measured was solar generation, not load change.
+
+### 4.2 Report numbers invalidated: none
+
+I checked rather than assumed.
+
+- **`ramping_rate` is never quoted in `docs/REPORT_2026-10.md`**, in `README.md` or in
+  `docs/SUMMARY.md`. `grep -in ramping` over all three returns nothing.
+- **`avg_daily_peak` is never quoted either.** Every "Peak kW" / "Peak [kW]" column in the
+  report comes from `peak_import_kw`, which this change does not touch
+  (`ev_rl_report.py:18`, `hp_report.py:20`, `ev_report.py:142`). Confirmed numerically
+  against the stored records: recomputing the §5 table from `results/ablation_v1/`
+  reproduces the report's column exactly from `peak_import_kw` —
+
+  | arm | report §5 "Peak kW" | mean `peak_import_kw` | mean `avg_daily_peak` |
+  |---|---|---|---|
+  | idle | 35.1 | **35.1** | 23.5 |
+  | idle + calibrated | 35.2 | **35.2** | 23.6 |
+  | rule | 45.1 | **45.1** | 26.9 |
+  | rule + calibrated | 45.1 | **45.1** | 26.9 |
+  | RL (Lagrangian only) | 41.4 | **41.4** | 21.1 |
+
+  `hp_report.py:21` does emit an `avg_daily_peak` column labelled "Daily peak [kW]", and
+  `paper_table.py` normalises both `avg_daily_peak` and `ramping_rate` — but neither table
+  appears in the report as it stands.
+
+**What *is* invalidated: 213 stored run records.** Every record under `results/` that
+carries `eval.avg_daily_peak` and `eval.ramping_rate` holds them under the old signed
+definition — `ablation_v1` 80, `mixed_v1` 32, `ws_paper` 23, `ev_rl_v2` 18, `heatpump_v1`
+16, `ablation_v2` 16, `ev_rl_v1` 12, `pilot_v2` 10, `heatpump_power_v1` 6. Those two
+fields must not be compared with, or pooled with, values produced by current code. The
+other KPIs in those records are unaffected. `experiments/aggregate.py` already refuses to
+aggregate across code fingerprints, and step 5 widens that fingerprint, so a mixed
+comparison will be refused rather than silently averaged — but anyone reading a stored
+record by hand should know. Nothing under `results/` was deleted or regenerated.

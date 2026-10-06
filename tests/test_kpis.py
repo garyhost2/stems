@@ -189,3 +189,74 @@ def test_avoidable_split_is_nan_without_a_measured_rate():
     r = m.compute_all()
     assert r["soc_violation_rate"] == pytest.approx(1.0)
     assert math.isnan(r["avoidable_violation_rate"])
+
+
+# --- audit B5: one definition of district import for every grid-side KPI -------
+#
+# District import at step t, kW:  G_t = sum_b max(e_bt, 0)
+# where e_bt is building b's net electricity consumption. The signed alternative
+# sum_b e_bt lets one building's export cancel another's import, which no physical
+# path in the model permits and which none of the CBF, the fleet shield or the reward
+# does. These tests pin G_t for the two KPIs that used the signed sum.
+
+def test_exports_do_not_offset_another_buildings_import_for_avg_daily_peak():
+    """Two buildings, +5 kW and -4 kW. Import is 5 kW; the signed sum would say 1 kW."""
+    m = calc(B=2)
+    m.add_step([obs(), obs()], np.zeros((2, 3), np.float32),
+               [obs(net=5.0), obs(net=-4.0)])
+    r = m.compute_all()
+    assert r["avg_daily_peak"] == pytest.approx(5.0)
+    assert r["avg_daily_peak"] == pytest.approx(r["peak_import_kw"]), (
+        "with a single day the average daily peak is the peak import, by definition")
+
+
+def test_exports_do_not_offset_another_buildings_import_for_ramping_rate():
+    """Ramping is |G_t - G_{t-1}| averaged over t, on the import series.
+
+    Step 1: imports 5 and 0 -> G = 5. Step 2: imports 0 and 0 (one exports 4) -> G = 0.
+    So the ramp is 5 kW. Under the signed sum it would have been |1 - (-4)| = 5 by
+    coincidence here, so the second pair below breaks the tie: G goes 5 -> 2, ramp 3,
+    while the signed sum goes 1 -> -6, ramp 7.
+    """
+    m = calc(B=2)
+    m.add_step([obs(), obs()], np.zeros((2, 3), np.float32),
+               [obs(net=5.0), obs(net=-4.0)])
+    m.add_step([obs(), obs()], np.zeros((2, 3), np.float32),
+               [obs(net=2.0), obs(net=-8.0)])
+    assert m.compute_all()["ramping_rate"] == pytest.approx(3.0)
+
+
+def test_every_grid_side_kpi_uses_the_same_import_series():
+    """peak, average daily peak, ramping, cap exceedance and the violation rate agree.
+
+    Three steps, two buildings, with an exporter present throughout so the signed and
+    positive-part definitions differ at every step:
+        t=0: (10, -6) -> G=10
+        t=1: ( 4, -6) -> G=4
+        t=2: ( 7, -1) -> G=7
+    G = (10, 4, 7). peak 10; one day so avg_daily_peak 10; ramps |4-10|, |7-4| -> mean
+    4.5; with P_grid_max = 5 the exceedance is (10-5) + 0 + (7-5) = 7 kWh at dt = 1 h and
+    the violation rate is 2/3.
+    """
+    m = calc(B=2, cbf_config=CBFConfig(P_grid_max=5.0, P_building_max=100.0))
+    for e0, e1 in ((10.0, -6.0), (4.0, -6.0), (7.0, -1.0)):
+        m.add_step([obs(), obs()], np.zeros((2, 3), np.float32),
+                   [obs(net=e0), obs(net=e1)])
+    r = m.compute_all()
+    assert r["peak_import_kw"] == pytest.approx(10.0)
+    assert r["avg_daily_peak"] == pytest.approx(10.0)
+    assert r["ramping_rate"] == pytest.approx(4.5)
+    assert r["cap_exceedance_kwh"] == pytest.approx(7.0)
+    assert r["grid_violation_rate"] == pytest.approx(2 / 3)
+
+
+def test_the_two_definitions_still_agree_when_nobody_exports():
+    """Without exports the change is a no-op, so single-building runs are unaffected."""
+    m = calc(B=2)
+    for e0, e1 in ((3.0, 1.0), (5.0, 2.0), (1.0, 1.0)):
+        m.add_step([obs(), obs()], np.zeros((2, 3), np.float32),
+                   [obs(net=e0), obs(net=e1)])
+    r = m.compute_all()
+    signed = np.array([4.0, 7.0, 2.0])
+    assert r["avg_daily_peak"] == pytest.approx(float(signed.max()))
+    assert r["ramping_rate"] == pytest.approx(float(np.abs(np.diff(signed)).mean()))

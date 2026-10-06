@@ -153,17 +153,25 @@ class MetricsCalculator:
 
         emission = float((np.maximum(net, 0.0) * carbon).sum())
 
-        total_net = net.sum(axis=1)
+        # District import, kW: the sum over buildings of each building's *import*.
+        # One building's export does not offset another's import, because the two
+        # cannot net out without a physical path between them and because this is the
+        # quantity the CBF, the fleet shield and the reward all constrain. Audit B5:
+        # avg_daily_peak and ramping_rate used the signed sum net.sum(axis=1) while
+        # peak_import_kw, cap_exceedance_kwh and grid_violation_rate used this one, so
+        # the headline "average daily peak" was not the quantity any constraint in the
+        # repository controls. One definition now, used by all five.
+        grid_series = np.maximum(net, 0.0).sum(axis=1)
+
         steps_per_day = max(1, int(round(24 / self.hours_per_step)))
-        daily_peaks = [float(np.maximum(total_net[s:s + steps_per_day], 0.0).max())
+        daily_peaks = [float(grid_series[s:s + steps_per_day].max())
                        for s in range(0, T, steps_per_day)]
         avg_daily_peak = float(np.mean(daily_peaks))
 
         electricity_consumption = float(np.maximum(net, 0.0).sum())
 
         if T > 1:
-            ramps = np.abs(np.diff(total_net))
-            ramping_rate = float(ramps.mean())
+            ramping_rate = float(np.abs(np.diff(grid_series)).mean())
         else:
             ramping_rate = 0.0
 
@@ -230,7 +238,6 @@ class MetricsCalculator:
         }
 
         dt = self.hours_per_step
-        grid_series = np.maximum(net, 0.0).sum(axis=1)
         peak_import = float(grid_series.max())
         result["peak_import_kw"] = peak_import
         result["load_factor"] = (float(grid_series.mean()) / peak_import
