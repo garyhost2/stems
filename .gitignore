@@ -23,3 +23,6 @@ third_party/
 
 # Local copy of the CityLearn dataset cache (142 MB, downloaded, never version this)
 .citylearn_cache/
+
+# Parallel-track worktrees (methods phase)
+.worktrees/
