@@ -695,9 +695,21 @@ saving. The GCN loop was 43% of `batch_forward` at N = 8760 (301.1 ms of 695.6 m
 temporal transformer is the rest, and `batch_forward` is itself only part of an update.
 At the level that matters — one PPO update — the measured saving is **1.30–1.34x**, not
 2.5x. The change is still worth having, it is free of numerical risk, and it removes an
-O(N) Python loop from the inner training path. But a five-seed grid will cost roughly
-3.8 times a two-seed grid, not 2.5, and the budget should be planned on that. If more
-is needed, the transformer is where to look next.
+O(N) Python loop from the inner training path. But the budget must be planned on 1.32x,
+not on parity:
+
+    cost(5 seeds, new code) / cost(2 seeds, old code) = (5 / 1.32) / 2 = 1.9
+
+So a five-seed grid costs about **1.9 times** what the current two-seed grid costs — an
+improvement on the 2.5x it would have cost with no speed-up at all, but not the parity
+the audit projected. If parity is actually needed, the temporal transformer is the next
+place to look: it is the remaining 57% of `batch_forward` at N = 8760.
+
+*Correction:* an earlier draft of this paragraph, and the commit message of `4f4b53a`,
+said "roughly 3.8 times a two-seed grid". That is 5/1.32, which compares a five-seed
+grid against a **one**-seed grid while the sentence claimed a two-seed baseline. The
+figure is 1.9. The commit message is left as it stands rather than rewriting published
+history; this entry is the correct record.
 
 ---
 
