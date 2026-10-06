@@ -35,7 +35,7 @@ recourse: it commands the minimum number of steps that would suffice if nothing 
 happened. A bigger source raises ``rate``, so ``steps_needed`` falls -- to **1** for
 six of the eight buildings at twice the sizing rule -- and the whole cycle then has to
 succeed inside a single hour. Hot-water draws on this schema are bursty: the **median
-hourly draw is 0.0 kWh** while the maximum is 3.1 to 6.3 kWh depending on the building.
+hourly draw is 0.0 kWh** while the per-building maximum ranges from 1.613 to 6.302 kWh.
 So a median-quantile reserve is no reserve at all, and one burst in the single forced
 hour defeats the deadline.
 

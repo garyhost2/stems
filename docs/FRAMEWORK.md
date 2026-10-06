@@ -133,7 +133,7 @@ Three caveats belong with those numbers, not under them.
    comes from `action_for_soc_gain`, a linear map `gap / rate * action_bound`, and
    `EVReadinessBarrier` derates `rate` by `rate_derate = 0.85` to stay on the safe side
    of it. The exact inverses above are used by the cap shield and the model-predictive
-   controller. Section 5 of `CHANGELOG.md` for this branch records the seam that closes
+   controller. `CHANGELOG.md`, abstraction track step 2.2, records the seam that closes
    this (`DeadlineStorageBarrier(plant=...)`, off by default) and why it was not turned
    on in a refactor.
 
@@ -169,9 +169,11 @@ forecast is not a cap.
 
 ---
 
-## 5. The four instantiations
+## 5. The instantiations
 
-Each row is one constructor call. Nothing in the table is a separate enforcement path.
+Four loads, plus the building envelope, which is in the family and gated off on this
+testbed (last row). Each row is one constructor call; nothing in the table is a
+separate enforcement path.
 
 | load | store | `rate` is set by | `required_soc` | deadline | plant model |
 |---|---|---|---|---|---|
@@ -202,8 +204,8 @@ building-windows) on the real hot-water series:
 
 A **larger source completes fewer cycles**, which is not a bug: it raises `rate`, so
 `steps_needed` falls to 1 for six of eight buildings, and the whole cycle must then
-succeed inside one hour. The median hourly draw is 0.0 kWh and the maximum is 3.1–6.3
-kWh, so a median reserve is no reserve. The lever that works is the reserve, not the
+succeed inside one hour. The median hourly draw is 0.0 kWh and the per-building
+maximum ranges from 1.613 to 6.302 kWh, so a median reserve is no reserve. The lever that works is the reserve, not the
 source. Closing the gap properly needs a forecast of the draw during the forced hours;
 `draw_margin_kwh` is the declared stand-in and defaults to zero, which guarantees the
 deadline only against a zero draw.
@@ -276,4 +278,4 @@ one.
 | `soc` is linear in store temperature | **assumption**: a fully mixed tank. A real cylinder stratifies, so the energy to disinfect the whole volume is understated whenever a draw has left a cold bottom layer |
 | Unmet hot water is zero at the design note's sizing rule on this schema | **measured**, `experiments/legionella_demo.py`; it appears (4.17 kWh) only at a quarter of the rule |
 | A just-in-time deadline does not survive a bursty disturbance | **measured**, same script; 1 of 16 windows met with a median reserve, 10 of 16 with a 90th-percentile reserve |
-| A weekly Legionella cycle has not previously been posed as an RL deadline constraint | **plausible, not established**; see `CHANGELOG.md` and §5 of `stems/legionella.py` |
+| A weekly Legionella cycle has not previously been posed as a deadline constraint in reinforcement learning | **plausible, not established.** `docs/LITERATURE.md` found no such work; that is an absence of evidence from one search, not a proven absence. [engelbrecht2021optimal] is a confirmed field study of 77 water heaters (median saving 21.9% → 16.2% with Legionella prevention) but its method is A\* search, not RL; the second citation the earlier report leaned on was struck — [reyespremer2025model] does not mention Legionella. See `stems/legionella.py` |

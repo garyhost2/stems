@@ -2012,7 +2012,7 @@ traced before being reported. It is not a bug. A larger source raises `rate`, so
 `steps_needed` falls — to **1** for six of the eight buildings at twice the sizing
 rule — and the entire cycle must then succeed inside one hour. Measured on this
 schema, the **median hourly hot-water draw is 0.0 kWh** (draws are bursty) while the
-maximum is 3.122 to 6.302 kWh per building, so a median-quantile reserve is no reserve
+per-building maximum ranges from 1.613 to 6.302 kWh, so a median-quantile reserve is no reserve
 at all and one burst in the single forced hour defeats the deadline. The lever is the
 reserve, not the source: 1 → 10 of 16 at unchanged source size.
 
@@ -2055,3 +2055,11 @@ and the constraint would be unsatisfiable by construction.
   Legionella cycle as a deadline constraint was found. That is an absence of evidence
   from one search, not a proven absence.* **Plausible and not established.** The module
   docstring says exactly this, so the wording travels with the code.
+
+**Correction, same session.** Step 4.2 originally stated the per-building maximum
+hot-water draw as "3.122 to 6.302 kWh", and `docs/FRAMEWORK.md` and
+`experiments/legionella_demo.py` carried the same range. The measured values are
+`[3.816, 4.785, 3.122, 5.198, 1.613, 6.108, 5.956, 6.302]` kWh, so the minimum is
+**1.613 kWh**, not 3.122 — the second-smallest was read as the smallest. All three
+places now read 1.613 to 6.302 kWh. The argument is unaffected (the point is that the
+median is 0.0 kWh while peaks are of order kWh), but the number was wrong.
