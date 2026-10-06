@@ -3,12 +3,12 @@ __pycache__/
 .venv/
 .pytest_cache/
 
-# Run logs, plots and trained model checkpoints
+# Run logs and plots. Trained policy checkpoints under results/**/*_model/ ARE
+# versioned: 8.5 MB total, and not reproducible without re-running training.
 logs/
 run_logs/
 plots/
 checkpoints/
-results/**/*_model/
 
 # Scratch result directories
 results/smoke_*/
@@ -27,3 +27,6 @@ third_party/
 # Parallel-track worktrees (methods phase)
 .worktrees/
 .scratch/
+
+# Written by scripts/resume.sh with machine-specific absolute paths
+scripts/env.sh

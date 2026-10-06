@@ -1,0 +1,31 @@
+# Exact environment the audit/2026-10 results were produced on.
+# Python 3.12.14. Install with scripts/resume.sh, which handles the two
+# install-order constraints noted below.
+#
+# torch is the CPU wheel from download.pytorch.org, not PyPI. It is installed
+# separately in resume.sh because it needs --index-url.
+#
+# citylearn must be installed with --no-deps: its own pins drag in an old numpy
+# and pandas that break the rest of this set. Its real runtime needs are listed
+# below it and installed explicitly.
+numpy==1.26.4
+pandas==3.0.3
+scipy==1.17.1
+scikit-learn==1.9.0
+matplotlib==3.11.0
+gymnasium==0.28.1
+cvxpy==1.7.5
+clarabel==0.11.1
+osqp==1.1.3
+scs==3.3.1
+ecos
+# citylearn==2.6.0b1 installed with --no-deps; these are the deps it actually uses
+NREL-PySAM==7.1.1.post1
+platformdirs==4.10.0
+PyYAML==6.0.3
+colorama==0.4.6
+cloudpickle==3.1.2
+narwhals==2.22.1
+# only needed to read the committed tariff PDF under docs/sources/
+pypdfium2==5.14.0
+pytest
