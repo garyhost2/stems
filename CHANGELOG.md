@@ -2360,3 +2360,29 @@ actually reaches the caller on every path.
 Per the brief. The `cap` section's rollouts are a closed-form synthetic base-load process
 driven through `FleetShield` in memory; no CityLearn episode is stepped anywhere in this
 track except the one-day environment built to read the eight real battery parameters.
+
+## Resume kit, and an overstated timing assertion corrected
+
+`tests/test_encoder_batching.py::test_the_batched_path_is_faster_than_the_loop`
+asserted `fast < slow` on the mean of three repetitions and failed on a loaded
+machine: batched 39.8 ms against loop 35.0 ms. Re-measured over nine repetitions at
+N = 336 with **both** paths warmed (the old test warmed only the batched path, which
+biased the comparison in its own favour): batched min 37.4, median 40.3, max 43.5 ms;
+loop min 34.7, median 48.7, max 50.3 ms. The speedup is **1.208x on the median and
+0.930x on the minimum** — the batched path is the slower of the two on a best-case run.
+
+The assertion was therefore wrong, not flaky. It is consistent with the figure already
+in this changelog: the graph convolution stage alone is 33-57x faster batched, but it
+is only about 43% of `batch_forward`, and one full PPO-Lagrangian update gains just
+1.30-1.34x. The test is renamed `test_the_batched_path_is_not_materially_slower_than_the_loop`
+and now compares medians with a 1.25x tolerance, which is a claim that survives a
+change of machine. The correctness claim is unaffected: the tests above it still pin
+that the batched and looped paths produce the same tensors.
+
+Also added for the workstation change: `scripts/resume.sh` (rebuild the environment,
+dataset cache and generated schemas, then run the suite), `requirements-lock.txt`, and
+`RESUME.md`. `results/**/*_model/` is no longer gitignored — 20 trained policy
+directories, 8.5 MB, not reproducible without re-running training.
+
+Full suite after the cap-default change of the previous commit: **654 passed, 1 failed**,
+the one failure being the timing assertion corrected here.
