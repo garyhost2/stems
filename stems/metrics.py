@@ -14,6 +14,41 @@ _IDX_NET, _IDX_SOC_ELEC, _IDX_SOC_DHW, _IDX_DHW_DEMAND, _IDX_SOLAR = obs_indices
     "net_electricity_consumption", "electrical_storage_soc", "dhw_storage_soc",
     "dhw_demand", "solar_generation")
 
+def district_signed_kw(net: np.ndarray) -> np.ndarray:
+    """Signed district net electricity consumption, kW: ``sum_b e_bt``.
+
+    One building's export offsets another's import. This is **CityLearn's own
+    convention**: ``CityLearnEnv.net_electricity_consumption`` is documented as the
+    "Summed ``Building.net_electricity_consumption`` time series" and applies no
+    clipping, and ``citylearn.cost_function.CostFunction.peak`` consumes exactly that
+    series. KPIs built on this series are therefore comparable with published CityLearn
+    numbers and with the STEMS paper's Table I normalisation.
+
+    It is **not** the quantity any constraint in this repository enforces. For that, see
+    ``district_import_kw``.
+    """
+    return net.sum(axis=1)
+
+
+def district_import_kw(net: np.ndarray) -> np.ndarray:
+    """District import, kW: ``sum_b max(e_bt, 0)``.
+
+    Exports are not allowed to cancel imports, because no physical path in the model
+    lets one house's PV serve another's load. This is the quantity the control barrier
+    shield (``CBFShield._apply_power_guard``, ``_apply_hvac_power_guard``), the fleet
+    shield's LP and the reward's grid term all enforce, and the only one of the two that
+    can be meaningfully compared against a cap.
+    """
+    return np.maximum(net, 0.0).sum(axis=1)
+
+
+#: KPIs on the signed series: comparable with CityLearn's published cost functions.
+CITYLEARN_COMPARABLE_KPIS = ("avg_daily_peak", "ramping_rate")
+
+#: KPIs on the import series: comparable with a grid cap, and with nothing else.
+CONSTRAINT_FACING_KPIS = ("peak_import_kw", "load_factor", "cap_exceedance_kwh",
+                          "grid_violation_rate")
+
 _HVAC_ON = 0.05
 _INTERVENTION_TOL = 1e-3
 _EV_TOL = 1e-3
@@ -153,25 +188,35 @@ class MetricsCalculator:
 
         emission = float((np.maximum(net, 0.0) * carbon).sum())
 
-        # District import, kW: the sum over buildings of each building's *import*.
-        # One building's export does not offset another's import, because the two
-        # cannot net out without a physical path between them and because this is the
-        # quantity the CBF, the fleet shield and the reward all constrain. Audit B5:
-        # avg_daily_peak and ramping_rate used the signed sum net.sum(axis=1) while
-        # peak_import_kw, cap_exceedance_kwh and grid_violation_rate used this one, so
-        # the headline "average daily peak" was not the quantity any constraint in the
-        # repository controls. One definition now, used by all five.
-        grid_series = np.maximum(net, 0.0).sum(axis=1)
+        # Two district series, named once here and never conflated. Audit B5 reported
+        # that mixing them was a bug and that both KPIs below should move to the import
+        # series; that is wrong and is corrected in CHANGELOG.md. CityLearn's own
+        # CostFunction.peak consumes the *signed* series, so moving these two would make
+        # them disagree with the simulator and with the Table I normalisation
+        # experiments/paper_table.py compares against. The defect is that the split was
+        # implicit; it is now explicit, and a test pins which family each KPI is in.
+        signed_series = district_signed_kw(net)   # CityLearn-comparable
+        grid_series = district_import_kw(net)     # constraint-facing
 
         steps_per_day = max(1, int(round(24 / self.hours_per_step)))
-        daily_peaks = [float(grid_series[s:s + steps_per_day].max())
+        # The zero floor is pre-existing behaviour and is kept deliberately: a day in
+        # which the district exports at every hour contributes 0, not a negative peak.
+        # CityLearn's CostFunction.peak does not floor, so the two differ only on an
+        # all-exporting day, which does not occur in any window used here.
+        daily_peaks = [float(np.maximum(signed_series[s:s + steps_per_day], 0.0).max())
                        for s in range(0, T, steps_per_day)]
+        # The plain mean of the daily maxima. CityLearn's CostFunction.peak returns a
+        # running mean of the same maxima; its final element equals this scalar exactly,
+        # so the reported number is CityLearn-comparable (pinned by a test).
         avg_daily_peak = float(np.mean(daily_peaks))
 
         electricity_consumption = float(np.maximum(net, 0.0).sum())
 
         if T > 1:
-            ramping_rate = float(np.abs(np.diff(grid_series)).mean())
+            # Mean absolute step-to-step change of the signed district series. Note this
+            # is NOT CityLearn's CostFunction.ramping, which clips to positive ramps and
+            # returns a running sum; only the underlying series is shared.
+            ramping_rate = float(np.abs(np.diff(signed_series)).mean())
         else:
             ramping_rate = 0.0
 

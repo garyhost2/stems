@@ -308,86 +308,106 @@ data is in fact present locally.
 
 ---
 
-## Step 4 — Unify the district-import definition (audit B5)
+## Step 4 — Name the two district series and keep them apart (audit B5, **corrected**)
 
-### 4.1 `avg_daily_peak` and `ramping_rate` now use the positive-part sum
+### 4.1 Correction: audit B5's prescription was wrong, and was not implemented
 
-**What.** `MetricsCalculator.compute_all` computed a single series
+The audit found that `MetricsCalculator` uses the **signed** district sum for
+`avg_daily_peak` and `ramping_rate` and the **positive-part** sum for `peak_import_kw`,
+`cap_exceedance_kwh` and `grid_violation_rate`, called the mixture a bug, and asked for
+the positive-part definition everywhere. The observation is right; the prescription is
+wrong, and it was reverted before landing.
+
+**Evidence, from the installed `citylearn` 2.6.0b1 source.**
+
+- `CityLearnEnv.net_electricity_consumption` is documented as the "Summed
+  `Building.net_electricity_consumption` time series, in [kWh]" and applies no clipping.
+  It is signed.
+- `CostFunction.peak(net_electricity_consumption, window=24)` consumes that signed
+  series directly: it groups by 24-step window, takes each window's `max()`, then a
+  `rolling(window=n, min_periods=1).mean()`.
+
+So the signed sum is **CityLearn's own convention**, and `avg_daily_peak` already
+matches it. Moving it to the positive-part sum would have made the repository's headline
+peak disagree with the simulator, with CityLearn's published cost function, and with the
+STEMS paper's Table I normalisation that `experiments/paper_table.py` compares against —
+the opposite of what the audit intended.
+
+**The real defect** is that one object carried two district definitions with nothing in
+the code or the output saying which was which. That is what is fixed.
+
+### 4.2 The split is now explicit
+
+**What.** Two named helpers in `stems/metrics.py`, each with the docstring that says what
+it is for, and two declared KPI families:
 
 ```python
-total_net = net.sum(axis=1)          # signed: one building's export offsets another's import
+district_signed_kw(net) = net.sum(axis=1)                 # S_t = sum_b e_bt
+district_import_kw(net) = np.maximum(net, 0).sum(axis=1)  # G_t = sum_b max(e_bt, 0)
+
+CITYLEARN_COMPARABLE_KPIS = ("avg_daily_peak", "ramping_rate")
+CONSTRAINT_FACING_KPIS    = ("peak_import_kw", "load_factor",
+                             "cap_exceedance_kwh", "grid_violation_rate")
 ```
 
-and used it for `avg_daily_peak` and `ramping_rate`, while `peak_import_kw`,
-`cap_exceedance_kwh` and `grid_violation_rate` used
+`compute_all` binds both series once at the top and every KPI takes one of them.
 
-```python
-grid_series = np.maximum(net, 0.0).sum(axis=1)   # positive part
-```
+**Consequence that must reach the paper.** A neighbourhood peak reported under
+CityLearn's convention is **not** the quantity the cap constrains. `S_t` can sit well
+below `G_t` whenever any house exports — on the full-year idle rollout at least one
+building exports in 43.7% of hours — so a paper sentence of the form "the controller
+holds the neighbourhood peak to X kW" has to say which of the two X is. Only `G_t` can
+be compared against a cap; only `S_t` can be compared against a CityLearn baseline.
 
-There is now one series, the positive-part one, used by all five.
+**Evidence.** Six cases in `tests/test_kpis.py` (24 of 24 pass):
+`test_the_two_district_series_differ_whenever_a_building_exports` (the guard against a
+future silent unification), `test_citylearn_comparable_kpis_use_the_signed_series` and
+`test_constraint_facing_kpis_use_the_import_series` (each asserts its family's values
+*and* that they differ from the other family's), `test_the_two_kpi_families_are_declared_and_disjoint`,
+`test_both_families_agree_when_nobody_exports`, and — the strongest one —
+`test_avg_daily_peak_equals_citylearns_cost_function`, which asserts
+`avg_daily_peak == CostFunction.peak(S)[-1]` on three days of heavily exporting
+synthetic data.
 
-**Why.** Writing `e_bt` for building b's net electricity consumption at step t, the
-district import is `G_t = sum_b max(e_bt, 0)`. The signed alternative `sum_b e_bt` lets
-one house's PV export cancel another's import, which no physical path in the model
-permits. More to the point, the CBF (`_apply_power_guard`, `_apply_hvac_power_guard`),
-the fleet shield and the reward's grid term all enforce the positive-part definition, so
-the headline "average daily peak" was not the quantity any constraint in the repository
-controls (audit B5).
+### 4.3 Plain mean versus running mean: they agree on the reported scalar
 
-**Evidence (tests).** Four new cases in `tests/test_kpis.py`, alongside the
-`test_exports_do_not_offset_another_buildings_import_for_peak` that already pinned the
-convention for `peak_import_kw`:
-`..._for_avg_daily_peak`, `..._for_ramping_rate`,
-`test_every_grid_side_kpi_uses_the_same_import_series` (one worked example where peak 10,
-avg daily peak 10, ramping 4.5, cap exceedance 7 kWh and violation rate 2/3 all follow
-from the same `G = (10, 4, 7)`), and `test_the_two_definitions_still_agree_when_nobody_exports`.
-22 of 22 pass.
+CityLearn's `CostFunction.peak` returns a *running* mean of the daily maxima; this
+repository returns a plain mean. They coincide at the final element, and the final
+element is the scalar CityLearn reports, so the two agree exactly. Verified: on 72 steps
+of synthetic data, CityLearn's series is (32.329269, 38.267218, 39.189044) and the plain
+mean of the daily maxima is 39.189044. **Nothing changed here**; the equality is now
+pinned by `test_avg_daily_peak_equals_citylearns_cost_function`.
 
-**Evidence (magnitude).** Idle rollouts on the real Travis 8-building schema, so the net
-series is the simulator's own:
+One deliberate, pre-existing difference is kept and documented in the code: this
+repository floors a day's peak at zero, so an all-exporting day contributes 0 rather than
+a negative peak. CityLearn does not floor. The two therefore differ only on a day in
+which the district exports at every single hour, which occurs in none of the windows used
+here.
 
-| window | hours with ≥1 exporter | `avg_daily_peak` signed → positive | `ramping_rate` signed → positive | `peak_import_kw` |
-|---|---|---|---|---|
-| summer, 14 d | 50.7% | 12.183 → 12.382 kW (+1.63%) | 4.991 → 1.853 kW (**−62.9%**) | 18.989 kW, unchanged |
-| winter, 14 d | 37.3% | 19.281 → 19.281 kW (0.00%) | 4.990 → 2.750 kW (**−44.9%**) | 39.634 kW, unchanged |
-| full year | 43.7% | 14.919 → 14.947 kW (+0.18%) | 4.810 → 2.257 kW (**−53.1%**) | 39.634 kW, unchanged |
+`ramping_rate` is a different matter and the code now says so. It is the mean absolute
+step-to-step change of the signed series. CityLearn's `CostFunction.ramping` clips to
+*positive* ramps by default (`down_ramp=False`) and returns a running **sum**, not a
+mean: on the same 72-step series CityLearn gives 689.2994 and this repository gives
+19.2597. They share the underlying series and nothing else, so `ramping_rate` must not be
+presented as a CityLearn-comparable number even though it is in the signed family.
 
-`avg_daily_peak` barely moves because the hour that sets a day's peak is usually an hour
-in which nobody is exporting. `ramping_rate` roughly halves, because the signed sum
-swings through the PV midday while the import series does not: most of what the old
-ramping metric measured was solar generation, not load change.
+### 4.4 Behaviour unchanged, and no report number invalidated
 
-### 4.2 Report numbers invalidated: none
+**Behaviour.** `avg_daily_peak` and `ramping_rate` keep the values they had. Real idle
+rollouts on the Travis 8-building schema, before the step-4 edit and after it:
 
-I checked rather than assumed.
+| window | `avg_daily_peak` | `ramping_rate` | `peak_import_kw` |
+|---|---|---|---|
+| summer, 14 d | 12.183 → 12.183 kW | 4.991 → 4.991 kW | 18.989 → 18.989 kW |
+| winter, 14 d | 19.281 → 19.281 kW | 4.990 → 4.990 kW | 39.634 → 39.634 kW |
 
-- **`ramping_rate` is never quoted in `docs/REPORT_2026-10.md`**, in `README.md` or in
-  `docs/SUMMARY.md`. `grep -in ramping` over all three returns nothing.
-- **`avg_daily_peak` is never quoted either.** Every "Peak kW" / "Peak [kW]" column in the
-  report comes from `peak_import_kw`, which this change does not touch
-  (`ev_rl_report.py:18`, `hp_report.py:20`, `ev_report.py:142`). Confirmed numerically
-  against the stored records: recomputing the §5 table from `results/ablation_v1/`
-  reproduces the report's column exactly from `peak_import_kw` —
-
-  | arm | report §5 "Peak kW" | mean `peak_import_kw` | mean `avg_daily_peak` |
-  |---|---|---|---|
-  | idle | 35.1 | **35.1** | 23.5 |
-  | idle + calibrated | 35.2 | **35.2** | 23.6 |
-  | rule | 45.1 | **45.1** | 26.9 |
-  | rule + calibrated | 45.1 | **45.1** | 26.9 |
-  | RL (Lagrangian only) | 41.4 | **41.4** | 21.1 |
-
-  `hp_report.py:21` does emit an `avg_daily_peak` column labelled "Daily peak [kW]", and
-  `paper_table.py` normalises both `avg_daily_peak` and `ramping_rate` — but neither table
-  appears in the report as it stands.
-
-**What *is* invalidated: 213 stored run records.** Every record under `results/` that
-carries `eval.avg_daily_peak` and `eval.ramping_rate` holds them under the old signed
-definition — `ablation_v1` 80, `mixed_v1` 32, `ws_paper` 23, `ev_rl_v2` 18, `heatpump_v1`
-16, `ablation_v2` 16, `ev_rl_v1` 12, `pilot_v2` 10, `heatpump_power_v1` 6. Those two
-fields must not be compared with, or pooled with, values produced by current code. The
-other KPIs in those records are unaffected. `experiments/aggregate.py` already refuses to
-aggregate across code fingerprints, and step 5 widens that fingerprint, so a mixed
-comparison will be refused rather than silently averaged — but anyone reading a stored
-record by hand should know. Nothing under `results/` was deleted or regenerated.
+**Report numbers invalidated: none.** This is now true by construction, since no KPI
+changed value. For the record, had the audit's prescription been implemented it would
+also have invalidated nothing in `docs/REPORT_2026-10.md`: `ramping_rate` is never quoted
+there, in `README.md` or in `docs/SUMMARY.md`, and every "Peak kW" / "Peak [kW]" column
+comes from `peak_import_kw`, which the prescription did not touch. Confirmed numerically
+— recomputing the §5 table from `results/ablation_v1/` reproduces the report's column
+exactly from `peak_import_kw` (idle 35.1, idle+calibrated 35.2, rule 45.1,
+rule+calibrated 45.1, RL 41.4), while the corresponding `avg_daily_peak` means are
+23.5, 23.6, 26.9, 26.9 and 21.1. The 213 stored run records that carry both KPIs remain
+valid and comparable with current code.

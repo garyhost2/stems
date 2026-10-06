@@ -191,72 +191,111 @@ def test_avoidable_split_is_nan_without_a_measured_rate():
     assert math.isnan(r["avoidable_violation_rate"])
 
 
-# --- audit B5: one definition of district import for every grid-side KPI -------
+# --- audit B5, as corrected: two district series, named and kept apart -------
 #
-# District import at step t, kW:  G_t = sum_b max(e_bt, 0)
-# where e_bt is building b's net electricity consumption. The signed alternative
-# sum_b e_bt lets one building's export cancel another's import, which no physical
-# path in the model permits and which none of the CBF, the fleet shield or the reward
-# does. These tests pin G_t for the two KPIs that used the signed sum.
+# e_bt   building b's net electricity consumption at step t, kW, positive = import
+# S_t    signed district series,  S_t = sum_b e_bt            (CityLearn's convention)
+# G_t    district import series,  G_t = sum_b max(e_bt, 0)    (what a cap constrains)
+#
+# The audit called the coexistence of the two a bug and asked for G everywhere. That is
+# wrong: CityLearn's own CostFunction.peak consumes the signed series, so moving
+# avg_daily_peak onto G would make it disagree with the simulator and with the Table I
+# normalisation paper_table.py compares against. Both series are legitimate; the defect
+# was that the split was implicit. These tests pin which KPI is in which family.
 
-def test_exports_do_not_offset_another_buildings_import_for_avg_daily_peak():
-    """Two buildings, +5 kW and -4 kW. Import is 5 kW; the signed sum would say 1 kW."""
-    m = calc(B=2)
-    m.add_step([obs(), obs()], np.zeros((2, 3), np.float32),
-               [obs(net=5.0), obs(net=-4.0)])
-    r = m.compute_all()
-    assert r["avg_daily_peak"] == pytest.approx(5.0)
-    assert r["avg_daily_peak"] == pytest.approx(r["peak_import_kw"]), (
-        "with a single day the average daily peak is the peak import, by definition")
+from stems.metrics import (CITYLEARN_COMPARABLE_KPIS, CONSTRAINT_FACING_KPIS,
+                           district_import_kw, district_signed_kw)
 
 
-def test_exports_do_not_offset_another_buildings_import_for_ramping_rate():
-    """Ramping is |G_t - G_{t-1}| averaged over t, on the import series.
+def _exporting_run():
+    """Three steps, two buildings, an exporter present at every step, so S_t != G_t.
 
-    Step 1: imports 5 and 0 -> G = 5. Step 2: imports 0 and 0 (one exports 4) -> G = 0.
-    So the ramp is 5 kW. Under the signed sum it would have been |1 - (-4)| = 5 by
-    coincidence here, so the second pair below breaks the tie: G goes 5 -> 2, ramp 3,
-    while the signed sum goes 1 -> -6, ramp 7.
-    """
-    m = calc(B=2)
-    m.add_step([obs(), obs()], np.zeros((2, 3), np.float32),
-               [obs(net=5.0), obs(net=-4.0)])
-    m.add_step([obs(), obs()], np.zeros((2, 3), np.float32),
-               [obs(net=2.0), obs(net=-8.0)])
-    assert m.compute_all()["ramping_rate"] == pytest.approx(3.0)
-
-
-def test_every_grid_side_kpi_uses_the_same_import_series():
-    """peak, average daily peak, ramping, cap exceedance and the violation rate agree.
-
-    Three steps, two buildings, with an exporter present throughout so the signed and
-    positive-part definitions differ at every step:
-        t=0: (10, -6) -> G=10
-        t=1: ( 4, -6) -> G=4
-        t=2: ( 7, -1) -> G=7
-    G = (10, 4, 7). peak 10; one day so avg_daily_peak 10; ramps |4-10|, |7-4| -> mean
-    4.5; with P_grid_max = 5 the exceedance is (10-5) + 0 + (7-5) = 7 kWh at dt = 1 h and
-    the violation rate is 2/3.
+        t=0: (10, -6) -> S=4,  G=10
+        t=1: ( 4, -6) -> S=-2, G=4
+        t=2: ( 7, -1) -> S=6,  G=7
     """
     m = calc(B=2, cbf_config=CBFConfig(P_grid_max=5.0, P_building_max=100.0))
     for e0, e1 in ((10.0, -6.0), (4.0, -6.0), (7.0, -1.0)):
         m.add_step([obs(), obs()], np.zeros((2, 3), np.float32),
                    [obs(net=e0), obs(net=e1)])
+    return m, np.array([[10.0, -6.0], [4.0, -6.0], [7.0, -1.0]])
+
+
+def test_the_two_district_series_differ_whenever_a_building_exports():
+    _, net = _exporting_run()
+    s, g = district_signed_kw(net), district_import_kw(net)
+    assert s == pytest.approx([4.0, -2.0, 6.0])
+    assert g == pytest.approx([10.0, 4.0, 7.0])
+    assert not np.allclose(s, g), (
+        "if these ever coincide on exporting data the two families have been silently "
+        "unified and the regression guard below is testing nothing")
+
+
+def test_citylearn_comparable_kpis_use_the_signed_series():
+    m, net = _exporting_run()
     r = m.compute_all()
-    assert r["peak_import_kw"] == pytest.approx(10.0)
-    assert r["avg_daily_peak"] == pytest.approx(10.0)
-    assert r["ramping_rate"] == pytest.approx(4.5)
-    assert r["cap_exceedance_kwh"] == pytest.approx(7.0)
+    s = district_signed_kw(net)
+    assert r["avg_daily_peak"] == pytest.approx(float(np.maximum(s, 0.0).max()))
+    assert r["ramping_rate"] == pytest.approx(float(np.abs(np.diff(s)).mean()))
+    # and demonstrably not the import series
+    g = district_import_kw(net)
+    assert r["ramping_rate"] != pytest.approx(float(np.abs(np.diff(g)).mean()))
+
+
+def test_constraint_facing_kpis_use_the_import_series():
+    m, net = _exporting_run()
+    r = m.compute_all()
+    g = district_import_kw(net)
+    assert r["peak_import_kw"] == pytest.approx(float(g.max()))          # 10
+    assert r["cap_exceedance_kwh"] == pytest.approx(
+        float(np.maximum(g - 5.0, 0.0).sum()))                            # 5 + 0 + 2
     assert r["grid_violation_rate"] == pytest.approx(2 / 3)
+    assert r["load_factor"] == pytest.approx(float(g.mean() / g.max()))
+    # and demonstrably not the signed series
+    s = district_signed_kw(net)
+    assert r["peak_import_kw"] != pytest.approx(float(s.max()))
 
 
-def test_the_two_definitions_still_agree_when_nobody_exports():
-    """Without exports the change is a no-op, so single-building runs are unaffected."""
+def test_avg_daily_peak_equals_citylearns_cost_function():
+    """The scalar must match CityLearn's published KPI, or it is not comparable.
+
+    ``CostFunction.peak`` groups the signed series into 24-step windows, takes each
+    window's max, then a running mean; its final element is the plain mean of the daily
+    maxima, which is what this repository reports. Checked on three days of synthetic
+    data that exports heavily, so the signed and import series differ at most hours.
+    """
+    from citylearn.cost_function import CostFunction
+
+    rng = np.random.default_rng(0)
+    net = rng.normal(3.0, 12.0, size=(72, 2)).astype(np.float32)
     m = calc(B=2)
-    for e0, e1 in ((3.0, 1.0), (5.0, 2.0), (1.0, 1.0)):
+    for row in net:
+        m.add_step([obs(), obs()], np.zeros((2, 3), np.float32),
+                   [obs(net=float(row[0])), obs(net=float(row[1]))])
+    s = district_signed_kw(net)
+    assert (np.asarray([s[i:i + 24].max() for i in range(0, 72, 24)]) > 0).all(), (
+        "this fixture needs every day to have at least one importing hour, because the "
+        "repository floors a day's peak at zero and CityLearn does not")
+    assert m.compute_all()["avg_daily_peak"] == pytest.approx(
+        CostFunction.peak(list(map(float, s)))[-1], rel=1e-5)
+
+
+def test_the_two_kpi_families_are_declared_and_disjoint():
+    assert set(CITYLEARN_COMPARABLE_KPIS).isdisjoint(CONSTRAINT_FACING_KPIS)
+    m, _ = _exporting_run()
+    r = m.compute_all()
+    for key in CITYLEARN_COMPARABLE_KPIS + CONSTRAINT_FACING_KPIS:
+        assert key in r, f"{key} is declared in a family but not produced"
+
+
+def test_both_families_agree_when_nobody_exports():
+    """Without exports S == G, so the distinction is invisible on import-only data."""
+    m = calc(B=2)
+    net = np.array([[3.0, 1.0], [5.0, 2.0], [1.0, 1.0]])
+    for e0, e1 in net:
         m.add_step([obs(), obs()], np.zeros((2, 3), np.float32),
                    [obs(net=e0), obs(net=e1)])
+    assert district_signed_kw(net) == pytest.approx(district_import_kw(net))
     r = m.compute_all()
-    signed = np.array([4.0, 7.0, 2.0])
-    assert r["avg_daily_peak"] == pytest.approx(float(signed.max()))
-    assert r["ramping_rate"] == pytest.approx(float(np.abs(np.diff(signed)).mean()))
+    assert r["avg_daily_peak"] == pytest.approx(7.0)
+    assert r["peak_import_kw"] == pytest.approx(7.0)
