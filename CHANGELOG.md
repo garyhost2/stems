@@ -2063,3 +2063,51 @@ hot-water draw as "3.122 to 6.302 kWh", and `docs/FRAMEWORK.md` and
 **1.613 kWh**, not 3.122 — the second-smallest was read as the smallest. All three
 places now read 1.613 to 6.302 kWh. The argument is unaffected (the point is that the
 median is 0.0 kWh while peaks are of order kWh), but the number was wrong.
+
+## Test floor after the abstraction track
+
+`PYTHONPATH=. XDG_CACHE_HOME=<repo>/.citylearn_cache python -m pytest tests/ -q
+-p no:randomly` on the final commit: **597 passed, 0 failed, 0 skipped**, 293.03 s,
+against the entry floor of 538 passed / 0 failed / 0 skipped. Net **+59 passing, 0
+failing, nothing newly skipped**. The one warning is the pre-existing `requires_grad`
+warning at `stems/mappo.py:258`.
+
+New cases: `tests/test_flexibility.py` (20), `tests/test_replay_env.py` (13),
+`tests/test_legionella.py` (26). One existing test was edited, recorded under the
+test-editing rule in step 2.3.
+
+**An external flake that cost two measurements, recorded so the next session does not
+re-diagnose it.** Three intermediate runs of this track reported `15 skipped`, every
+one of them an electric-vehicle case in `tests/test_ev_real.py` or
+`tests/test_env_widening.py`. The cause is **not** the code and not a missing dataset:
+`citylearn_challenge_2022_phase_all_plus_evs` is present in the cache, but CityLearn
+resolves dataset *names* through `https://api.github.com/repos/intelligent-
+environments-lab/CityLearn/contents/data/datasets`, which is rate-limited to 60
+anonymous requests per hour per IP and returns **HTTP 403** once that is spent. The
+tests catch the exception and convert it into `pytest.skip("... dataset
+unavailable")`, so a network rate limit reads as missing data. The limit resets hourly;
+the final run above was taken after it cleared and all 15 pass. A run of this suite
+that reports 15 EV skips should check `curl -s https://api.github.com/rate_limit`
+before looking anywhere else.
+
+The behavioural fingerprint of step 2.1 was re-taken on the final commit, after steps 3
+and 4 had landed: `before.json` against `after.json`, **0 differing field(s), largest
+absolute difference 0.000e+00**.
+
+## Not done, and why
+
+* **Nothing was trained and no grid was run.** Per the brief. The two diagnostics
+  (`experiments/legionella_demo.py`, `experiments/replay_roundtrip.py`) are single
+  deterministic rollouts with no policy and no seeds, written to
+  `experiments/diagnostics/`, not to `results/`.
+* **The exact plant inverse behind the deadline barrier is off.** The seam exists and
+  is tested; switching it on changes trajectories and is a measured comparison, not a
+  refactor. See step 2.2.
+* **`ShadowTank` is not wired into `STEMSEnvironment`.** It would change the energy
+  accounting of every existing run. See step 4.
+* **No sourced value for `P_hp`, the four temperatures, or the coefficient of
+  performance at the disinfection sink.** They remain required arguments with no
+  default, and `LegionellaSpec.unsourced` reports them at runtime.
+* **The hot-water service constraint still does not bind on this testbed** at the
+  design note's sizing rule. The mechanism that would make it bind is implemented and
+  measures zero here; see step 4.3.
