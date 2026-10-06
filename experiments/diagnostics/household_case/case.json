@@ -1,0 +1,500 @@
+{
+  "generated": "2026-10-06 16:17:16",
+  "cap_diagnostic": {
+    "arm": "idle",
+    "scenario_cap_kw": 300.0,
+    "peak_import_kw": 41.882219314575195,
+    "mean_import_kw": 8.718937039147338,
+    "peak_over_cap_pct": 13.960739771525065,
+    "hours_above_cap": 0,
+    "steps": 8759,
+    "suggested_fraction": 0.8,
+    "suggested_cap_kw": 33.505775451660156
+  },
+  "scenario": {
+    "schema": "citylearn_schemas/tx_travis_8b/schema.json",
+    "season": "year",
+    "subset_seed": null,
+    "n_buildings": 8,
+    "days": 28,
+    "grid_cap_kw": 300.0,
+    "building_cap_kw": 80.0,
+    "hvac_control": "setpoint",
+    "heat_pump": true,
+    "allow_missing_obs": false,
+    "degradation_price_per_kwh": 0.0,
+    "degradation_limit_kwh_per_episode": null,
+    "degradation_dod_exponent": 0.0,
+    "key": "tx_travis_8b__year-insample__refn8__cap300-80",
+    "buildings": [
+      "resstock-amy2018-2021-release-1-134795",
+      "resstock-amy2018-2021-release-1-15942",
+      "resstock-amy2018-2021-release-1-344233",
+      "resstock-amy2018-2021-release-1-400973",
+      "resstock-amy2018-2021-release-1-412815",
+      "resstock-amy2018-2021-release-1-427553",
+      "resstock-amy2018-2021-release-1-494842",
+      "resstock-amy2018-2021-release-1-519975"
+    ],
+    "train_window": [
+      0,
+      8759
+    ],
+    "eval_window": [
+      0,
+      8759
+    ]
+  },
+  "seed": 0,
+  "window": [
+    0,
+    8759
+  ],
+  "steps": 8759,
+  "households": 8,
+  "comfort_tolerance_c": 1.0,
+  "comfort_source": "Chosen for this study: +/-1.0 degC around the CityLearn cooling and heating set points, tighter than the ASHRAE 55 comfort zone width, counted over occupied hours only. Not a measured constant; reported with every comfort number.",
+  "district_cap_kw": 300.0,
+  "ev_penetration": null,
+  "tariff_sources": {
+    "citylearn_tou": "pricing.csv shipped with the CityLearn citylearn_challenge_2022_phase_all dataset (Nweye, Sankaranarayanan & Nagy 2023, doi:10.18738/T8/0YLJ6Q). Time-of-use, five distinct prices spanning 0.21-0.54 USD/kWh, peak 16:00-20:00 local. The neighbourhood is in Fontana, California (Nweye et al., NeurIPS 2022 Competition Track, PMLR 220:85-103), NOT Travis County, Texas.",
+    "austin_standard": "City of Austin Electric Tariff effective 2025-11-01 (FY2026), https://austinenergy.com/-/media/project/websites/shared/pdfs/rates/tariff.pdf, retrieved 2026-10-06; Residential Service Inside City Limits (p. 4), Regulatory Charge Secondary energy basis (p. 27). Customer charge 16.50 USD/mo; tiers 4.640/5.138/7.525/10.884 c/kWh at 300/900/2000 kWh; flat riders PSA 4.118 + CBC 1.275 + Regulatory 1.338 c/kWh. No time-of-use component.",
+    "austin_tou_pilot": "City of Austin Electric Tariff effective 2025-11-01 (FY2026), https://austinenergy.com/-/media/project/websites/shared/pdfs/rates/tariff.pdf, retrieved 2026-10-06; Residential Service Inside City Limits (p. 4) with the Pilot Programs Residential Time-of-Use power supply charges (p. 37) in lieu of the standard PSA: off-peak 2.677, mid-peak 4.118, on-peak 8.442 c/kWh; weekday on-peak 15:00-18:00, mid-peak 07:00-15:00 and 18:00-22:00, off-peak 22:00-07:00, weekends off-peak all day. Pilot limited to 100 individual meters (p. 36)."
+  },
+  "factor_sources": {
+    "citylearn_hourly": "carbon_intensity.csv shipped with citylearn_challenge_2022_phase_all (doi:10.18738/T8/0YLJ6Q); hourly, mean 0.1565 kg CO2/kWh over 8760 h. California grid, NOT ERCOT.",
+    "erct_annual": "US EPA, Greenhouse Gas Equivalencies Calculator - Calculations and References, eGRID Regions table, ERCT 'ERCOT All' total output (baseload) rate, eGRID2022 (year 2022 data) [771.1 lb CO2/MWh, delivered basis]"
+  },
+  "price_signal": {
+    "citylearn_tou": {
+      "mean": 0.27313734444571297,
+      "min": 0.21,
+      "max": 0.54,
+      "ratio": 2.5714285714285716,
+      "time_varying": true
+    },
+    "austin_standard": {
+      "mean": 0.11371,
+      "min": 0.11371,
+      "max": 0.11371,
+      "ratio": 1.0,
+      "time_varying": false
+    },
+    "austin_tou_pilot": {
+      "mean": 0.10960620732960381,
+      "min": 0.0993,
+      "max": 0.15694999999999998,
+      "ratio": 1.5805639476334339,
+      "time_varying": true
+    }
+  },
+  "arms": {
+    "idle": {
+      "cases": {
+        "citylearn_tou|citylearn_hourly": {
+          "households": 8,
+          "bill_usd_mean": 2872.6341438588843,
+          "bill_usd_total": 22981.073150871074,
+          "bill_components_mean": {
+            "energy_usd": 2872.6341438588843,
+            "fixed_usd": 0.0,
+            "adders_usd": 0.0,
+            "total_usd": 2872.6341438588843
+          },
+          "co2_kg_mean": 1523.4451240303893,
+          "import_kwh_mean": 9546.146190736443,
+          "export_kwh_mean": 6451.010921586305,
+          "comfort_fraction_in_band_mean": 0.8549663797404219,
+          "gross_load_kwh_mean": 15638.240732836974,
+          "pv_kwh_mean": 12543.105463686836,
+          "comfort_hours_assessed_mean": 8075.0,
+          "own_peak_kw_mean": 11.440311551094055,
+          "coincident_peak_kw_mean": 5.235277414321899,
+          "district_peak_kw": 41.882219314575195,
+          "district_peak_step": 391,
+          "cap_exceedance_kwh": 0.0,
+          "steps": 8759
+        },
+        "citylearn_tou|erct_annual": {
+          "households": 8,
+          "bill_usd_mean": 2872.6341438588843,
+          "bill_usd_total": 22981.073150871074,
+          "bill_components_mean": {
+            "energy_usd": 2872.6341438588843,
+            "fixed_usd": 0.0,
+            "adders_usd": 0.0,
+            "total_usd": 2872.6341438588843
+          },
+          "co2_kg_mean": 3518.344101949356,
+          "import_kwh_mean": 9546.146190736443,
+          "export_kwh_mean": 6451.010921586305,
+          "comfort_fraction_in_band_mean": 0.8549663797404219,
+          "gross_load_kwh_mean": 15638.240732836974,
+          "pv_kwh_mean": 12543.105463686836,
+          "comfort_hours_assessed_mean": 8075.0,
+          "own_peak_kw_mean": 11.440311551094055,
+          "coincident_peak_kw_mean": 5.235277414321899,
+          "district_peak_kw": 41.882219314575195,
+          "district_peak_step": 391,
+          "cap_exceedance_kwh": 0.0,
+          "steps": 8759
+        },
+        "austin_standard|citylearn_hourly": {
+          "households": 8,
+          "bill_usd_mean": 1345.6859839856604,
+          "bill_usd_total": 10765.487871885283,
+          "bill_components_mean": {
+            "energy_usd": 505.13488388719037,
+            "fixed_usd": 198.0,
+            "adders_usd": 642.55110009847,
+            "total_usd": 1345.6859839856604
+          },
+          "co2_kg_mean": 1523.4451240303893,
+          "import_kwh_mean": 9546.146190736443,
+          "export_kwh_mean": 6451.010921586305,
+          "comfort_fraction_in_band_mean": 0.8549663797404219,
+          "gross_load_kwh_mean": 15638.240732836974,
+          "pv_kwh_mean": 12543.105463686836,
+          "comfort_hours_assessed_mean": 8075.0,
+          "own_peak_kw_mean": 11.440311551094055,
+          "coincident_peak_kw_mean": 5.235277414321899,
+          "district_peak_kw": 41.882219314575195,
+          "district_peak_step": 391,
+          "cap_exceedance_kwh": 0.0,
+          "steps": 8759,
+          "value_of_solar_credit_usd_mean": 1243.0217514513652,
+          "bill_net_of_solar_credit_usd_mean": 102.66423253429515,
+          "vos_gross_billed_usd_mean": 2199.790374784602,
+          "vos_credit_usd_mean": 1243.0217514513652,
+          "vos_net_bill_usd_mean": 956.7686233332365
+        },
+        "austin_standard|erct_annual": {
+          "households": 8,
+          "bill_usd_mean": 1345.6859839856604,
+          "bill_usd_total": 10765.487871885283,
+          "bill_components_mean": {
+            "energy_usd": 505.13488388719037,
+            "fixed_usd": 198.0,
+            "adders_usd": 642.55110009847,
+            "total_usd": 1345.6859839856604
+          },
+          "co2_kg_mean": 3518.344101949356,
+          "import_kwh_mean": 9546.146190736443,
+          "export_kwh_mean": 6451.010921586305,
+          "comfort_fraction_in_band_mean": 0.8549663797404219,
+          "gross_load_kwh_mean": 15638.240732836974,
+          "pv_kwh_mean": 12543.105463686836,
+          "comfort_hours_assessed_mean": 8075.0,
+          "own_peak_kw_mean": 11.440311551094055,
+          "coincident_peak_kw_mean": 5.235277414321899,
+          "district_peak_kw": 41.882219314575195,
+          "district_peak_step": 391,
+          "cap_exceedance_kwh": 0.0,
+          "steps": 8759,
+          "value_of_solar_credit_usd_mean": 1243.0217514513652,
+          "bill_net_of_solar_credit_usd_mean": 102.66423253429515,
+          "vos_gross_billed_usd_mean": 2199.790374784602,
+          "vos_credit_usd_mean": 1243.0217514513652,
+          "vos_net_bill_usd_mean": 956.7686233332365
+        },
+        "austin_tou_pilot|citylearn_hourly": {
+          "households": 8,
+          "bill_usd_mean": 1286.580801303506,
+          "bill_usd_total": 10292.646410428048,
+          "bill_components_mean": {
+            "energy_usd": 505.13488388719037,
+            "fixed_usd": 198.0,
+            "adders_usd": 583.4459174163156,
+            "total_usd": 1286.580801303506
+          },
+          "co2_kg_mean": 1523.4451240303893,
+          "import_kwh_mean": 9546.146190736443,
+          "export_kwh_mean": 6451.010921586305,
+          "comfort_fraction_in_band_mean": 0.8549663797404219,
+          "gross_load_kwh_mean": 15638.240732836974,
+          "pv_kwh_mean": 12543.105463686836,
+          "comfort_hours_assessed_mean": 8075.0,
+          "own_peak_kw_mean": 11.440311551094055,
+          "coincident_peak_kw_mean": 5.235277414321899,
+          "district_peak_kw": 41.882219314575195,
+          "district_peak_step": 391,
+          "cap_exceedance_kwh": 0.0,
+          "steps": 8759,
+          "value_of_solar_credit_usd_mean": 1243.0217514513652,
+          "bill_net_of_solar_credit_usd_mean": 43.559049852140745,
+          "vos_gross_billed_usd_mean": 2126.6223202108063,
+          "vos_credit_usd_mean": 1243.0217514513652,
+          "vos_net_bill_usd_mean": 883.6005687594408
+        },
+        "austin_tou_pilot|erct_annual": {
+          "households": 8,
+          "bill_usd_mean": 1286.580801303506,
+          "bill_usd_total": 10292.646410428048,
+          "bill_components_mean": {
+            "energy_usd": 505.13488388719037,
+            "fixed_usd": 198.0,
+            "adders_usd": 583.4459174163156,
+            "total_usd": 1286.580801303506
+          },
+          "co2_kg_mean": 3518.344101949356,
+          "import_kwh_mean": 9546.146190736443,
+          "export_kwh_mean": 6451.010921586305,
+          "comfort_fraction_in_band_mean": 0.8549663797404219,
+          "gross_load_kwh_mean": 15638.240732836974,
+          "pv_kwh_mean": 12543.105463686836,
+          "comfort_hours_assessed_mean": 8075.0,
+          "own_peak_kw_mean": 11.440311551094055,
+          "coincident_peak_kw_mean": 5.235277414321899,
+          "district_peak_kw": 41.882219314575195,
+          "district_peak_step": 391,
+          "cap_exceedance_kwh": 0.0,
+          "steps": 8759,
+          "value_of_solar_credit_usd_mean": 1243.0217514513652,
+          "bill_net_of_solar_credit_usd_mean": 43.559049852140745,
+          "vos_gross_billed_usd_mean": 2126.6223202108063,
+          "vos_credit_usd_mean": 1243.0217514513652,
+          "vos_net_bill_usd_mean": 883.6005687594408
+        }
+      }
+    },
+    "rbc": {
+      "cases": {
+        "citylearn_tou|citylearn_hourly": {
+          "households": 8,
+          "bill_usd_mean": 2346.6153657169366,
+          "bill_usd_total": 18772.922925735493,
+          "bill_components_mean": {
+            "energy_usd": 2346.6153657169366,
+            "fixed_usd": 0.0,
+            "adders_usd": 0.0,
+            "total_usd": 2346.6153657169366
+          },
+          "co2_kg_mean": 1442.7900701627939,
+          "import_kwh_mean": 9150.746483080118,
+          "export_kwh_mean": 5074.169015191495,
+          "comfort_fraction_in_band_mean": 0.8549663797404219,
+          "gross_load_kwh_mean": 16619.68293157546,
+          "pv_kwh_mean": 12543.105463686836,
+          "comfort_hours_assessed_mean": 8075.0,
+          "own_peak_kw_mean": 12.312365531921387,
+          "coincident_peak_kw_mean": 8.009445637464523,
+          "district_peak_kw": 64.07556509971619,
+          "district_peak_step": 1234,
+          "cap_exceedance_kwh": 0.0,
+          "steps": 8759
+        },
+        "citylearn_tou|erct_annual": {
+          "households": 8,
+          "bill_usd_mean": 2346.6153657169366,
+          "bill_usd_total": 18772.922925735493,
+          "bill_components_mean": {
+            "energy_usd": 2346.6153657169366,
+            "fixed_usd": 0.0,
+            "adders_usd": 0.0,
+            "total_usd": 2346.6153657169366
+          },
+          "co2_kg_mean": 3372.6149038468693,
+          "import_kwh_mean": 9150.746483080118,
+          "export_kwh_mean": 5074.169015191495,
+          "comfort_fraction_in_band_mean": 0.8549663797404219,
+          "gross_load_kwh_mean": 16619.68293157546,
+          "pv_kwh_mean": 12543.105463686836,
+          "comfort_hours_assessed_mean": 8075.0,
+          "own_peak_kw_mean": 12.312365531921387,
+          "coincident_peak_kw_mean": 8.009445637464523,
+          "district_peak_kw": 64.07556509971619,
+          "district_peak_step": 1234,
+          "cap_exceedance_kwh": 0.0,
+          "steps": 8759
+        },
+        "austin_standard|citylearn_hourly": {
+          "households": 8,
+          "bill_usd_mean": 1296.5830562836254,
+          "bill_usd_total": 10372.664450269003,
+          "bill_components_mean": {
+            "energy_usd": 482.64631050750273,
+            "fixed_usd": 198.0,
+            "adders_usd": 615.9367457761228,
+            "total_usd": 1296.5830562836254
+          },
+          "co2_kg_mean": 1442.7900701627939,
+          "import_kwh_mean": 9150.746483080118,
+          "export_kwh_mean": 5074.169015191495,
+          "comfort_fraction_in_band_mean": 0.8549663797404219,
+          "gross_load_kwh_mean": 16619.68293157546,
+          "pv_kwh_mean": 12543.105463686836,
+          "comfort_hours_assessed_mean": 8075.0,
+          "own_peak_kw_mean": 12.312365531921387,
+          "coincident_peak_kw_mean": 8.009445637464523,
+          "district_peak_kw": 64.07556509971619,
+          "district_peak_step": 1234,
+          "cap_exceedance_kwh": 0.0,
+          "steps": 8759,
+          "value_of_solar_credit_usd_mean": 1243.0217514513652,
+          "bill_net_of_solar_credit_usd_mean": 53.561304832260305,
+          "vos_gross_billed_usd_mean": 2340.806848767714,
+          "vos_credit_usd_mean": 1243.0217514513652,
+          "vos_net_bill_usd_mean": 1097.785097316349
+        },
+        "austin_standard|erct_annual": {
+          "households": 8,
+          "bill_usd_mean": 1296.5830562836254,
+          "bill_usd_total": 10372.664450269003,
+          "bill_components_mean": {
+            "energy_usd": 482.64631050750273,
+            "fixed_usd": 198.0,
+            "adders_usd": 615.9367457761228,
+            "total_usd": 1296.5830562836254
+          },
+          "co2_kg_mean": 3372.6149038468693,
+          "import_kwh_mean": 9150.746483080118,
+          "export_kwh_mean": 5074.169015191495,
+          "comfort_fraction_in_band_mean": 0.8549663797404219,
+          "gross_load_kwh_mean": 16619.68293157546,
+          "pv_kwh_mean": 12543.105463686836,
+          "comfort_hours_assessed_mean": 8075.0,
+          "own_peak_kw_mean": 12.312365531921387,
+          "coincident_peak_kw_mean": 8.009445637464523,
+          "district_peak_kw": 64.07556509971619,
+          "district_peak_step": 1234,
+          "cap_exceedance_kwh": 0.0,
+          "steps": 8759,
+          "value_of_solar_credit_usd_mean": 1243.0217514513652,
+          "bill_net_of_solar_credit_usd_mean": 53.561304832260305,
+          "vos_gross_billed_usd_mean": 2340.806848767714,
+          "vos_credit_usd_mean": 1243.0217514513652,
+          "vos_net_bill_usd_mean": 1097.785097316349
+        },
+        "austin_tou_pilot|citylearn_hourly": {
+          "households": 8,
+          "bill_usd_mean": 1230.8301321918561,
+          "bill_usd_total": 9846.64105753485,
+          "bill_components_mean": {
+            "energy_usd": 482.64631050750273,
+            "fixed_usd": 198.0,
+            "adders_usd": 550.1838216843533,
+            "total_usd": 1230.8301321918561
+          },
+          "co2_kg_mean": 1442.7900701627939,
+          "import_kwh_mean": 9150.746483080118,
+          "export_kwh_mean": 5074.169015191495,
+          "comfort_fraction_in_band_mean": 0.8549663797404219,
+          "gross_load_kwh_mean": 16619.68293157546,
+          "pv_kwh_mean": 12543.105463686836,
+          "comfort_hours_assessed_mean": 8075.0,
+          "own_peak_kw_mean": 12.312365531921387,
+          "coincident_peak_kw_mean": 8.009445637464523,
+          "district_peak_kw": 64.07556509971619,
+          "district_peak_step": 1234,
+          "cap_exceedance_kwh": 0.0,
+          "steps": 8759,
+          "value_of_solar_credit_usd_mean": 1243.0217514513652,
+          "bill_net_of_solar_credit_usd_mean": -12.191619259509238,
+          "vos_gross_billed_usd_mean": 2254.8525744979756,
+          "vos_credit_usd_mean": 1243.0217514513652,
+          "vos_net_bill_usd_mean": 1011.8308230466102
+        },
+        "austin_tou_pilot|erct_annual": {
+          "households": 8,
+          "bill_usd_mean": 1230.8301321918561,
+          "bill_usd_total": 9846.64105753485,
+          "bill_components_mean": {
+            "energy_usd": 482.64631050750273,
+            "fixed_usd": 198.0,
+            "adders_usd": 550.1838216843533,
+            "total_usd": 1230.8301321918561
+          },
+          "co2_kg_mean": 3372.6149038468693,
+          "import_kwh_mean": 9150.746483080118,
+          "export_kwh_mean": 5074.169015191495,
+          "comfort_fraction_in_band_mean": 0.8549663797404219,
+          "gross_load_kwh_mean": 16619.68293157546,
+          "pv_kwh_mean": 12543.105463686836,
+          "comfort_hours_assessed_mean": 8075.0,
+          "own_peak_kw_mean": 12.312365531921387,
+          "coincident_peak_kw_mean": 8.009445637464523,
+          "district_peak_kw": 64.07556509971619,
+          "district_peak_step": 1234,
+          "cap_exceedance_kwh": 0.0,
+          "steps": 8759,
+          "value_of_solar_credit_usd_mean": 1243.0217514513652,
+          "bill_net_of_solar_credit_usd_mean": -12.191619259509238,
+          "vos_gross_billed_usd_mean": 2254.8525744979756,
+          "vos_credit_usd_mean": 1243.0217514513652,
+          "vos_net_bill_usd_mean": 1011.8308230466102
+        }
+      }
+    }
+  },
+  "reference_arm": "idle",
+  "deltas": {
+    "rbc": {
+      "citylearn_tou|citylearn_hourly": {
+        "bill_saved_usd_mean": 526.0187781419479,
+        "bill_saved_frac_mean": 0.1789894027844635,
+        "co2_avoided_kg_mean": 80.65505386759519,
+        "import_avoided_kwh_mean": 395.3997076563246,
+        "export_forgone_kwh_mean": 1376.8419063948095,
+        "gross_load_saved_kwh_mean": -981.4421987384849,
+        "comfort_hours_gained_mean": 0.0,
+        "own_peak_cut_kw_mean": -0.8720539808273315,
+        "coincident_peak_cut_kw_mean": -2.774168223142624
+      },
+      "citylearn_tou|erct_annual": {
+        "bill_saved_usd_mean": 526.0187781419479,
+        "bill_saved_frac_mean": 0.1789894027844635,
+        "co2_avoided_kg_mean": 145.72919810248658,
+        "import_avoided_kwh_mean": 395.3997076563246,
+        "export_forgone_kwh_mean": 1376.8419063948095,
+        "gross_load_saved_kwh_mean": -981.4421987384849,
+        "comfort_hours_gained_mean": 0.0,
+        "own_peak_cut_kw_mean": -0.8720539808273315,
+        "coincident_peak_cut_kw_mean": -2.774168223142624
+      },
+      "austin_standard|citylearn_hourly": {
+        "bill_saved_usd_mean": 49.10292770203485,
+        "bill_saved_frac_mean": 0.03502057854491794,
+        "co2_avoided_kg_mean": 80.65505386759519,
+        "import_avoided_kwh_mean": 395.3997076563246,
+        "export_forgone_kwh_mean": 1376.8419063948095,
+        "gross_load_saved_kwh_mean": -981.4421987384849,
+        "comfort_hours_gained_mean": 0.0,
+        "own_peak_cut_kw_mean": -0.8720539808273315,
+        "coincident_peak_cut_kw_mean": -2.774168223142624
+      },
+      "austin_standard|erct_annual": {
+        "bill_saved_usd_mean": 49.10292770203485,
+        "bill_saved_frac_mean": 0.03502057854491794,
+        "co2_avoided_kg_mean": 145.72919810248658,
+        "import_avoided_kwh_mean": 395.3997076563246,
+        "export_forgone_kwh_mean": 1376.8419063948095,
+        "gross_load_saved_kwh_mean": -981.4421987384849,
+        "comfort_hours_gained_mean": 0.0,
+        "own_peak_cut_kw_mean": -0.8720539808273315,
+        "coincident_peak_cut_kw_mean": -2.774168223142624
+      },
+      "austin_tou_pilot|citylearn_hourly": {
+        "bill_saved_usd_mean": 55.750669111649984,
+        "bill_saved_frac_mean": 0.04191356787705047,
+        "co2_avoided_kg_mean": 80.65505386759519,
+        "import_avoided_kwh_mean": 395.3997076563246,
+        "export_forgone_kwh_mean": 1376.8419063948095,
+        "gross_load_saved_kwh_mean": -981.4421987384849,
+        "comfort_hours_gained_mean": 0.0,
+        "own_peak_cut_kw_mean": -0.8720539808273315,
+        "coincident_peak_cut_kw_mean": -2.774168223142624
+      },
+      "austin_tou_pilot|erct_annual": {
+        "bill_saved_usd_mean": 55.750669111649984,
+        "bill_saved_frac_mean": 0.04191356787705047,
+        "co2_avoided_kg_mean": 145.72919810248658,
+        "import_avoided_kwh_mean": 395.3997076563246,
+        "export_forgone_kwh_mean": 1376.8419063948095,
+        "gross_load_saved_kwh_mean": -981.4421987384849,
+        "comfort_hours_gained_mean": 0.0,
+        "own_peak_cut_kw_mean": -0.8720539808273315,
+        "coincident_peak_cut_kw_mean": -2.774168223142624
+      }
+    }
+  }
+}

@@ -26,3 +26,4 @@ third_party/
 
 # Parallel-track worktrees (methods phase)
 .worktrees/
+.scratch/

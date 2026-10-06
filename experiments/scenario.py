@@ -119,8 +119,25 @@ class Scenario:
     subset_seed: Optional[int] = None
     n_buildings: int = 8
     days: int = 28
-    grid_cap_kw: float = 300.0
-    building_cap_kw: float = 80.0
+    # Caps sized to BIND. The previous defaults (300 kW district, 80 kW per building)
+    # could not: a full-year no-control rollout of the eight-building reference stock
+    # peaks at 41.8822 kW district and 14.3167 kW for the heaviest building, so the
+    # district cap sat at 7.2x the peak it was meant to limit and was exceeded in 0 of
+    # 8759 hours. Under a cap that cannot be reached, a constrained arm is
+    # indistinguishable from an unconstrained one and every violation-rate column is
+    # structurally zero -- which is what results/ws_paper/ reported.
+    #
+    # Both defaults are now 80% of the measured uncontrolled peak, rounded down to
+    # 0.5 kW: 0.8 * 41.8822 = 33.5058 -> 33.5, and 0.8 * 14.3167 = 11.4534 -> 11.5.
+    # The 80% fraction is a design choice, not a sourced engineering limit; the peaks it
+    # multiplies are measurements, reproduced by
+    #     python -m experiments.household_case --season year --arms idle
+    # which writes them to experiments/diagnostics/household_case/case.json.
+    #
+    # These are the reference-stock values. A different building subset has a different
+    # peak, so E2's held-out subsets must re-measure rather than inherit these.
+    grid_cap_kw: float = 33.5
+    building_cap_kw: float = 11.5
     hvac_control: str = "setpoint"
     heat_pump: bool = True
     allow_missing_obs: bool = False
