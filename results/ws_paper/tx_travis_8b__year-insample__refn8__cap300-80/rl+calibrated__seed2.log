@@ -1,0 +1,18 @@
+19:02:33 train tx_travis_8b__year-insample__refn8__cap300-80 arm=rl+calibrated seed=2 episodes=15
+19:04:59 ep 1/15 reward=-8831.7 violating_steps=0.000 grad_steps=0 (142.1s)
+19:08:28 ep 2/15 reward=-9927.1 violating_steps=0.000 grad_steps=1370 (208.3s)
+19:11:35 ep 3/15 reward=-9532.1 violating_steps=0.000 grad_steps=1370 (187.5s)
+19:14:43 ep 4/15 reward=-8950.5 violating_steps=0.000 grad_steps=1370 (188.2s)
+19:17:10 ep 5/15 reward=-8330.5 violating_steps=0.000 grad_steps=721 (146.6s)
+19:19:55 ep 6/15 reward=-7776.5 violating_steps=0.000 grad_steps=1370 (164.8s)
+19:22:36 ep 7/15 reward=-7353.4 violating_steps=0.000 grad_steps=1370 (161.1s)
+19:25:17 ep 8/15 reward=-6944.6 violating_steps=0.000 grad_steps=1370 (161.0s)
+19:27:44 ep 9/15 reward=-6668.9 violating_steps=0.000 grad_steps=979 (146.7s)
+19:30:21 ep 10/15 reward=-6468.5 violating_steps=0.000 grad_steps=1276 (157.5s)
+19:32:21 ep 11/15 reward=-6289.2 violating_steps=0.000 grad_steps=181 (119.8s)
+19:34:33 ep 12/15 reward=-6029.3 violating_steps=0.000 grad_steps=573 (132.4s)
+19:37:07 ep 13/15 reward=-5850.9 violating_steps=0.000 grad_steps=1178 (154.1s)
+19:39:06 ep 14/15 reward=-5642.3 violating_steps=0.000 grad_steps=225 (118.8s)
+19:41:21 ep 15/15 reward=-5549.0 violating_steps=0.000 grad_steps=665 (135.2s)
+19:41:22 evaluate
+19:43:03 done verified=True violation=0.0000 cost=17670.5
