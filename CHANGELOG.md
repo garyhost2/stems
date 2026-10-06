@@ -2111,3 +2111,14 @@ absolute difference 0.000e+00**.
 * **The hot-water service constraint still does not bind on this testbed** at the
   design note's sizing rule. The mechanism that would make it bind is implemented and
   measures zero here; see step 4.3.
+
+**Correction, same session (2).** A comment in `experiments/legionella_demo.py`
+described the sizing sweep as using "the mean reserve". An earlier draft of the script
+did reserve `demand.mean(axis=0)`; when the reserve became a quantile the label was not
+updated, and the sweep in fact uses the **median** (quantile 0.5). The distinction is
+load-bearing rather than pedantic: measured on this schema the median hourly draw is
+0.0 kWh while the mean hourly draw is 0.0515–0.4154 kWh per building, so the two
+reserves are not interchangeable and "a median reserve is no reserve" depends on which
+one was used. Every reported number came from the quantile code and is unchanged; only
+the label was wrong. The prose in step 4.2 and in `docs/FRAMEWORK.md` already said
+"median" and needed no change.

@@ -98,8 +98,13 @@ SIZING_MULTIPLIERS = (0.25, 0.5, 1.0, 2.0)
 
 #: Quantiles of each building's own draw used as `draw_margin_kwh`, the reserve the
 #: barrier holds against hot-water being drawn *while the disinfection cycle runs*.
-#: Two one-dimensional sweeps are reported, not a grid: sizing at the mean reserve,
-#: and reserve at the nominal sizing.
+#: Two one-dimensional sweeps are reported, not a grid: sizing at the **median**
+#: reserve (quantile 0.5), and reserve quantile at the nominal sizing. The median, not
+#: the mean: an earlier draft of this script reserved `demand.mean(axis=0)` and the
+#: label was not updated when it became a quantile. The distinction is load-bearing
+#: here rather than pedantic -- hot-water draws are bursty, so on this schema the
+#: median hourly draw is 0.0 kWh while the mean is not, and "a median reserve is no
+#: reserve" is the finding below.
 RESERVE_QUANTILES = (0.5, 0.9, 1.0)
 
 
