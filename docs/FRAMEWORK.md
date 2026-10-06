@@ -207,6 +207,22 @@ they own) and `EVProvider` (the charger fleet). A real-building adapter implemen
 only if there are vehicles. `STEMSEnvironment` implements all three;
 `stems.replay.CSVReplayEnvironment` implements the first two from logged data.
 
+Demonstrated, not declared. `experiments/replay_roundtrip.py` exports a 72-step
+CityLearn rollout to the logged-data format, loads it back through the replay adapter,
+and projects the *same* `CBFShield` and the *same* `FlexibilityPortfolio` over both:
+
+| quantity, over 71 steps × 8 buildings | max absolute difference |
+|---|---|
+| observation vector, simulator vs replay | 0.000e+00 |
+| projected action, with the adapter's assumed flat plant curves | 3.155e-02 |
+| projected action, with the simulator's own plant curves | 0.000e+00 |
+
+The interface costs nothing; the *plant characterisation* costs 3.155e-02 of action.
+That is the number a deployment needs, because it says how much of the shield's
+guarantee rests on fitting the site's devices rather than on plumbing its data. A
+logged export does not come with measured efficiency and capacity-power curves, so the
+adapter assumes them flat and declares the assumption in `plant_notes`.
+
 What the replay adapter is for, stated plainly: it is **open loop**. Recorded
 observations do not respond to the actions a controller takes, so it can check that a
 controller runs, that the observation vector is laid out as `selected_obs_names`

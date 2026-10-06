@@ -1,0 +1,141 @@
+{
+  "dt_hours": 1.0,
+  "heat_pump": true,
+  "action_names": [
+    "dhw_storage",
+    "electrical_storage",
+    "cooling_or_heating_device"
+  ],
+  "exported_from": "citylearn_schemas/tx_travis_8b/schema.json",
+  "steps": 72,
+  "buildings": [
+    {
+      "name": "b0",
+      "csv": "b0.csv",
+      "battery": {
+        "capacity_kwh": 10.800000190734863,
+        "nominal_power_kw": 2.880000114440918,
+        "loss_coefficient": 0.005522421544283159
+      },
+      "dhw": {
+        "capacity_kwh": 6.757101058959961,
+        "heater_power_kw": 5.863419055938721,
+        "heater_efficiency": 0.9844134449958801,
+        "storage_efficiency": 0.9558520052692802,
+        "loss_coefficient": 0.0023653055541217327
+      }
+    },
+    {
+      "name": "b1",
+      "csv": "b1.csv",
+      "battery": {
+        "capacity_kwh": 6.599999904632568,
+        "nominal_power_kw": 1.6100000143051147,
+        "loss_coefficient": 0.00159817
+      },
+      "dhw": {
+        "capacity_kwh": 7.282660484313965,
+        "heater_power_kw": 5.729498863220215,
+        "heater_efficiency": 0.9175587296485901,
+        "storage_efficiency": 0.9647916407913879,
+        "loss_coefficient": 0.004082290921360254
+      }
+    },
+    {
+      "name": "b2",
+      "csv": "b2.csv",
+      "battery": {
+        "capacity_kwh": 5.0,
+        "nominal_power_kw": 2.5,
+        "loss_coefficient": 0.006619022174013399
+      },
+      "dhw": {
+        "capacity_kwh": 7.589635372161865,
+        "heater_power_kw": 4.064034938812256,
+        "heater_efficiency": 0.9745265245437622,
+        "storage_efficiency": 0.9865628335479116,
+        "loss_coefficient": 0.00833062268793583
+      }
+    },
+    {
+      "name": "b3",
+      "csv": "b3.csv",
+      "battery": {
+        "capacity_kwh": 9.699999809265137,
+        "nominal_power_kw": 5.0,
+        "loss_coefficient": 0.004079974400984001
+      },
+      "dhw": {
+        "capacity_kwh": 10.1600980758667,
+        "heater_power_kw": 6.757967472076416,
+        "heater_efficiency": 0.9316235780715942,
+        "storage_efficiency": 0.9742184133287174,
+        "loss_coefficient": 0.0059101516380906105
+      }
+    },
+    {
+      "name": "b4",
+      "csv": "b4.csv",
+      "battery": {
+        "capacity_kwh": 13.5,
+        "nominal_power_kw": 3.299999952316284,
+        "loss_coefficient": 0.006137450131453288
+      },
+      "dhw": {
+        "capacity_kwh": 6.560161113739014,
+        "heater_power_kw": 4.1513214111328125,
+        "heater_efficiency": 0.9509044289588928,
+        "storage_efficiency": 0.976190471157252,
+        "loss_coefficient": 0.006294783670455217
+      }
+    },
+    {
+      "name": "b5",
+      "csv": "b5.csv",
+      "battery": {
+        "capacity_kwh": 5.400000095367432,
+        "nominal_power_kw": 2.880000114440918,
+        "loss_coefficient": 0.003216117228890143
+      },
+      "dhw": {
+        "capacity_kwh": 11.174981117248535,
+        "heater_power_kw": 6.921514511108398,
+        "heater_efficiency": 0.9523082375526428,
+        "storage_efficiency": 0.9775636705593662,
+        "loss_coefficient": 0.006563073024153709
+      }
+    },
+    {
+      "name": "b6",
+      "csv": "b6.csv",
+      "battery": {
+        "capacity_kwh": 16.200000762939453,
+        "nominal_power_kw": 2.880000114440918,
+        "loss_coefficient": 0.0033683516907922232
+      },
+      "dhw": {
+        "capacity_kwh": 10.989421844482422,
+        "heater_power_kw": 7.370760917663574,
+        "heater_efficiency": 0.9407842755317688,
+        "storage_efficiency": 0.9730279602513093,
+        "loss_coefficient": 0.005678341258317232
+      }
+    },
+    {
+      "name": "b7",
+      "csv": "b7.csv",
+      "battery": {
+        "capacity_kwh": 16.0,
+        "nominal_power_kw": 3.319999933242798,
+        "loss_coefficient": 0.00817873777319163
+      },
+      "dhw": {
+        "capacity_kwh": 11.200160026550293,
+        "heater_power_kw": 6.406222820281982,
+        "heater_efficiency": 0.9836832284927368,
+        "storage_efficiency": 0.9809108119419266,
+        "loss_coefficient": 0.007218602113425732
+      }
+    }
+  ]
+}

@@ -1878,3 +1878,61 @@ from `ARMS`) is unchanged and still fails if a controller is exported without an
 names`), the exact-inverse seam and its default-off state, joint infeasibility that no
 device sees alone, and the shield-delegation equivalence across all three coordination
 rules including the append-after-construction case.
+
+## Step 3 — The swappable environment adapter
+
+**What.** `stems/protocols.py` (landed with step 2's commit) defines the seam, and
+`stems/replay.py::CSVReplayEnvironment` is the second implementation.
+`experiments/replay_roundtrip.py` demonstrates it.
+
+The interface is deliberately **split into three protocols rather than one**:
+
+* `Environment` — step, reset, the observation layout, the executed actions. Every
+  real-building adapter must implement this.
+* `PlantProvider` — the plant models for this site and the action columns they own.
+  An adapter implements it when the plant has been characterised; without it the
+  shield cannot be exact and must not pretend to be.
+* `EVProvider` — the charger fleet. Optional by construction: a building with no
+  vehicles is not a degenerate case to special-case, it simply does not implement it.
+
+An interface a real adapter cannot satisfy is an interface nobody implements. A metered
+house with no battery model can serve `Environment` today; `missing_capabilities()`
+then names the attributes it lacks rather than failing at the first attribute error
+four thousand steps into a run.
+
+**Why the adapter refuses more than it accepts.** `CSVReplayEnvironment` validates at
+construction and raises `ReplayManifestError` on: a missing observation column (it does
+**not** zero-fill — the shield reads observations by position and zero is a legal value
+for every one of them, so a fill is silent corruption, not a missing value); a
+non-ISO-8601 or non-increasing timestamp; a step length disagreeing with `dt_hours`; a
+state of charge outside [0, 1], an hour outside 1..24 or a temperature outside
+[-60, 60] degC (the unit errors that are actually detectable); buildings of different
+lengths; and a request for a plant model with no plant block in the manifest.
+
+**What it does not do, stated in the module docstring and asserted in tests.** It is
+*open loop*: recorded observations do not respond to the action, so every closed-loop
+quantity is counterfactual and the adapter cannot produce it. `step` returns a reward
+of exactly 0.0 rather than a plausible-looking number, `info["open_loop"]` is True at
+every step, and `executed_actions` returns **zeros** rather than echoing the command —
+echoing it would be a lie that every metric in `stems/metrics.py` would believe.
+
+**Evidence.** `experiments/replay_roundtrip.py` exports a 72-step CityLearn rollout to
+the logged-data format, reads it back through the adapter, and projects the same
+`CBFShield` and `FlexibilityPortfolio` over both. Over 71 steps × 8 buildings:
+
+| quantity | max absolute difference |
+|---|---|
+| observation vector, simulator vs replay | 0.000e+00 |
+| projected action, adapter's assumed flat plant curves | 3.155e-02 |
+| projected action, simulator's own plant curves | 0.000e+00 |
+
+The third row is the one worth having. The interface costs nothing; the 3.155e-02 is
+**entirely** the adapter's assumption that a logged export's battery efficiency and
+capacity-power curves are flat, because a manifest does not carry measured ones. That
+isolates how much of the shield's guarantee rests on characterising the site's devices
+rather than on plumbing its data — and it says that an unfitted plant model is the
+binding sim-to-real risk here, not the interface.
+
+Plus `tests/test_replay_env.py`, 13 cases: protocol conformance for both the adapter
+and a plant-less site, the canonical observation layout, a shield running on logged
+data with no CityLearn import, and seven refusals.
