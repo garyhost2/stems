@@ -1,0 +1,431 @@
+{
+  "scenario": {
+    "schema": "citylearn_schemas/tx_travis_8b/schema.json",
+    "season": "winter",
+    "subset_seed": null,
+    "n_buildings": 8,
+    "days": 28,
+    "grid_cap_kw": 300.0,
+    "building_cap_kw": 80.0,
+    "hvac_control": "setpoint",
+    "heat_pump": true,
+    "allow_missing_obs": false,
+    "key": "tx_travis_8b__winter28d__refn8__cap300-80",
+    "buildings": [
+      "resstock-amy2018-2021-release-1-134795",
+      "resstock-amy2018-2021-release-1-15942",
+      "resstock-amy2018-2021-release-1-344233",
+      "resstock-amy2018-2021-release-1-400973",
+      "resstock-amy2018-2021-release-1-412815",
+      "resstock-amy2018-2021-release-1-427553",
+      "resstock-amy2018-2021-release-1-494842",
+      "resstock-amy2018-2021-release-1-519975"
+    ],
+    "train_window": [
+      0,
+      671
+    ],
+    "eval_window": [
+      672,
+      1343
+    ]
+  },
+  "steps": 336,
+  "seed": 0,
+  "rows": [
+    {
+      "arm": "dmappo",
+      "steps": 336,
+      "explore": true,
+      "verified": true,
+      "battery": {
+        "n_charge": 940,
+        "n_rest": 1566,
+        "contrast": 0.3008744716644287,
+        "responds": true
+      },
+      "dhw": {
+        "n_charge": 230,
+        "n_rest": 1311,
+        "contrast": 0.20792582631111145,
+        "responds": true
+      },
+      "hvac": {
+        "heating": {
+          "correlation": 0.8003571579540303,
+          "responds": true
+        },
+        "cooling": {
+          "correlation": 0.6656292787098567,
+          "responds": true
+        },
+        "responds": true
+      },
+      "median_ms_per_step": 2.5877234947984107,
+      "p95_ms_per_step": 2.7935840043937787,
+      "mean_ms_per_step": 2.599055937198933,
+      "build_seconds": 0.44
+    },
+    {
+      "arm": "madcq",
+      "steps": 336,
+      "explore": true,
+      "verified": true,
+      "battery": {
+        "n_charge": 955,
+        "n_rest": 1458,
+        "contrast": 0.35512232780456543,
+        "responds": true
+      },
+      "dhw": {
+        "n_charge": 224,
+        "n_rest": 1519,
+        "contrast": 0.2216927707195282,
+        "responds": true
+      },
+      "hvac": {
+        "heating": {
+          "correlation": 0.798373357696504,
+          "responds": true
+        },
+        "cooling": {
+          "correlation": 0.754859026125468,
+          "responds": true
+        },
+        "responds": true
+      },
+      "median_ms_per_step": 4.109233494091313,
+      "p95_ms_per_step": 4.313099499995587,
+      "mean_ms_per_step": 4.1037955450173325,
+      "build_seconds": 0.0
+    },
+    {
+      "arm": "maddpg",
+      "steps": 336,
+      "explore": true,
+      "verified": true,
+      "battery": {
+        "n_charge": 384,
+        "n_rest": 2251,
+        "contrast": 0.257773756980896,
+        "responds": true
+      },
+      "dhw": {
+        "n_charge": 114,
+        "n_rest": 1380,
+        "contrast": 0.3365757167339325,
+        "responds": true
+      },
+      "hvac": {
+        "heating": {
+          "correlation": 0.6935576017293851,
+          "responds": true
+        },
+        "cooling": {
+          "correlation": 0.48916972013382337,
+          "responds": true
+        },
+        "responds": true
+      },
+      "median_ms_per_step": 2.0325395016698167,
+      "p95_ms_per_step": 2.2003889971529134,
+      "mean_ms_per_step": 2.0487556103034876,
+      "build_seconds": 0.01
+    },
+    {
+      "arm": "mappo-cc",
+      "steps": 336,
+      "explore": true,
+      "verified": true,
+      "battery": {
+        "n_charge": 699,
+        "n_rest": 1681,
+        "contrast": 0.22042317688465118,
+        "responds": true
+      },
+      "dhw": {
+        "n_charge": 224,
+        "n_rest": 1339,
+        "contrast": 0.2392949014902115,
+        "responds": true
+      },
+      "hvac": {
+        "heating": {
+          "correlation": 0.801542409852409,
+          "responds": true
+        },
+        "cooling": {
+          "correlation": 0.665693878628939,
+          "responds": true
+        },
+        "responds": true
+      },
+      "median_ms_per_step": 2.3105779982870445,
+      "p95_ms_per_step": 2.454383997246623,
+      "mean_ms_per_step": 2.3091279943054404,
+      "build_seconds": 0.0
+    },
+    {
+      "arm": "marlisa",
+      "steps": 336,
+      "explore": true,
+      "verified": true,
+      "battery": {
+        "n_charge": 538,
+        "n_rest": 2109,
+        "contrast": 0.3095145523548126,
+        "responds": true
+      },
+      "dhw": {
+        "n_charge": 140,
+        "n_rest": 957,
+        "contrast": 0.25326594710350037,
+        "responds": true
+      },
+      "hvac": {
+        "heating": {
+          "correlation": 0.7293830480809795,
+          "responds": true
+        },
+        "cooling": {
+          "correlation": 0.42869156267676267,
+          "responds": true
+        },
+        "responds": true
+      },
+      "median_ms_per_step": 2.7847695018863305,
+      "p95_ms_per_step": 2.97216674516676,
+      "mean_ms_per_step": 2.7854346340713425,
+      "build_seconds": 0.01
+    },
+    {
+      "arm": "metaems",
+      "steps": 336,
+      "explore": true,
+      "verified": true,
+      "battery": {
+        "n_charge": 679,
+        "n_rest": 1965,
+        "contrast": 0.29273635149002075,
+        "responds": true
+      },
+      "dhw": {
+        "n_charge": 209,
+        "n_rest": 1443,
+        "contrast": 0.2996276319026947,
+        "responds": true
+      },
+      "hvac": {
+        "heating": {
+          "correlation": 0.7958123545678604,
+          "responds": true
+        },
+        "cooling": {
+          "correlation": 0.5345522187692737,
+          "responds": true
+        },
+        "responds": true
+      },
+      "median_ms_per_step": 2.6915405032923445,
+      "p95_ms_per_step": 2.8968440019525588,
+      "mean_ms_per_step": 2.715025313115066,
+      "build_seconds": 0.0
+    },
+    {
+      "arm": "mpc",
+      "steps": 336,
+      "explore": false,
+      "verified": true,
+      "battery": {
+        "n_charge": 308,
+        "n_rest": 2308,
+        "contrast": 0.2191883772611618,
+        "responds": true
+      },
+      "dhw": {
+        "n_charge": 36,
+        "n_rest": 2605,
+        "contrast": 0.3453330993652344,
+        "responds": true
+      },
+      "hvac": {
+        "heating": {
+          "correlation": 0.8331736418387804,
+          "responds": true
+        },
+        "cooling": {
+          "correlation": 0.6913737047389307,
+          "responds": true
+        },
+        "responds": true
+      },
+      "median_ms_per_step": 75.29063850233797,
+      "p95_ms_per_step": 77.51806425585528,
+      "mean_ms_per_step": 75.56424332198644,
+      "build_seconds": 0.0
+    },
+    {
+      "arm": "mpc-oracle",
+      "steps": 336,
+      "explore": false,
+      "verified": true,
+      "battery": {
+        "n_charge": 409,
+        "n_rest": 2186,
+        "contrast": 0.22658781707286835,
+        "responds": true
+      },
+      "dhw": {
+        "n_charge": 38,
+        "n_rest": 2590,
+        "contrast": 0.2919345200061798,
+        "responds": true
+      },
+      "hvac": {
+        "heating": {
+          "correlation": 0.8331736418387804,
+          "responds": true
+        },
+        "cooling": {
+          "correlation": 0.6913737047389307,
+          "responds": true
+        },
+        "responds": true
+      },
+      "median_ms_per_step": 75.31094500154722,
+      "p95_ms_per_step": 77.9186809922976,
+      "mean_ms_per_step": 75.22834810706193,
+      "build_seconds": 4.44
+    },
+    {
+      "arm": "sac",
+      "steps": 336,
+      "explore": true,
+      "verified": true,
+      "battery": {
+        "n_charge": 474,
+        "n_rest": 2186,
+        "contrast": 0.3066261410713196,
+        "responds": true
+      },
+      "dhw": {
+        "n_charge": 159,
+        "n_rest": 1520,
+        "contrast": 0.350782185792923,
+        "responds": true
+      },
+      "hvac": {
+        "heating": {
+          "correlation": 0.7618448807718388,
+          "responds": true
+        },
+        "cooling": {
+          "correlation": 0.5003508710682629,
+          "responds": true
+        },
+        "responds": true
+      },
+      "median_ms_per_step": 1.9365410043974407,
+      "p95_ms_per_step": 2.0863222525804304,
+      "mean_ms_per_step": 1.93988977094878,
+      "build_seconds": 0.0
+    },
+    {
+      "arm": "rbc+calibrated",
+      "steps": 336,
+      "explore": false,
+      "verified": true,
+      "battery": {
+        "n_charge": 408,
+        "n_rest": 2233,
+        "contrast": 0.15740132331848145,
+        "responds": true
+      },
+      "dhw": {
+        "n_charge": 174,
+        "n_rest": 2016,
+        "contrast": 0.23850220441818237,
+        "responds": true
+      },
+      "hvac": {
+        "heating": {
+          "correlation": 0.8331736418387804,
+          "responds": true
+        },
+        "cooling": {
+          "correlation": 0.6913737047389307,
+          "responds": true
+        },
+        "responds": true
+      },
+      "median_ms_per_step": 1.7139820047304966,
+      "p95_ms_per_step": 1.7489550009486265,
+      "mean_ms_per_step": 1.7126805449238636,
+      "build_seconds": 0.0
+    },
+    {
+      "arm": "rl+calibrated",
+      "steps": 336,
+      "explore": true,
+      "verified": true,
+      "battery": {
+        "n_charge": 846,
+        "n_rest": 1623,
+        "contrast": 0.27901142835617065,
+        "responds": true
+      },
+      "dhw": {
+        "n_charge": 226,
+        "n_rest": 1461,
+        "contrast": 0.2152254432439804,
+        "responds": true
+      },
+      "hvac": {
+        "heating": {
+          "correlation": 0.8019929571275994,
+          "responds": true
+        },
+        "cooling": {
+          "correlation": 0.7597348706596612,
+          "responds": true
+        },
+        "responds": true
+      },
+      "median_ms_per_step": 3.089502002694644,
+      "p95_ms_per_step": 3.3316434964945074,
+      "mean_ms_per_step": 3.0855940742964907,
+      "build_seconds": 0.01
+    },
+    {
+      "arm": "idle+calibrated",
+      "steps": 336,
+      "explore": false,
+      "verified": null,
+      "battery": {
+        "n_charge": 8,
+        "n_rest": 2680,
+        "responds": null
+      },
+      "dhw": {
+        "n_charge": 0,
+        "n_rest": 2688,
+        "responds": null
+      },
+      "hvac": {
+        "heating": {
+          "correlation": 0.8331736418387804,
+          "responds": true
+        },
+        "cooling": {
+          "correlation": 0.6913737047389307,
+          "responds": true
+        },
+        "responds": true
+      },
+      "median_ms_per_step": 1.6713555014575832,
+      "p95_ms_per_step": 1.7689837586658541,
+      "mean_ms_per_step": 1.6909662591344732,
+      "build_seconds": 0.0
+    }
+  ]
+}

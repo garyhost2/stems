@@ -14,38 +14,57 @@ LEAD_MARGIN = True
 
 RBC_ACTIONS = ["dhw_storage", "electrical_storage", "cooling_or_heating_device"]
 
+#: Comparison controllers: the seven methods of the STEMS paper's Table I plus MAPPO
+#: with a genuinely centralised critic. Each value says what the arm *is* now -- the
+#: reference implementation it follows -- not what remains to be built. Built by
+#: `build_controller`; see CHANGELOG.md steps 1-3 and `stems/baselines.py`.
+COMPARISON_POLICIES: Dict[str, str] = {
+    "sac": "single-agent soft actor-critic over the concatenated district observation "
+           "and the concatenated joint action, with twin target critics, a replay "
+           "buffer and automatic entropy tuning (stems.baselines.SingleAgentSAC)",
+    "dmappo": "independent PPO per building on local observations -- decentralised "
+              "training, decentralised execution -- with GAE, a clipped value loss, an "
+              "entropy bonus and a fixed behaviour log-probability "
+              "(stems.baselines.DMAPPOAgent)",
+    "mpc": "receding-horizon economic model-predictive control over the exact battery "
+           "and tank inverses, with the forecast the RL agent sees "
+           "(stems.mpc.StorageMPC + stems.forecast.CausalForecaster)",
+    "mpc-oracle": "the same MPC with perfect foresight of price, hot-water draw and the "
+                  "idle-counterfactual base load -- the upper reference "
+                  "(stems.mpc.StorageMPC + stems.forecast.OracleForecaster)",
+    "maddpg": "MADDPG: deterministic actors on local observations, a per-agent critic "
+              "on the joint observation and joint action, replay and target networks "
+              "(stems.baselines.MADDPGAgent)",
+    "marlisa": "MARLISA with measured sharing: soft actor-critic with iterative "
+               "sequential action selection, the augmentation stored at collection "
+               "time so the critic sees what the actor saw (stems.baselines.MARLISAAgent)",
+    "madcq": "constrained Q-learning over a branched discrete action set, the safe set "
+             "taken from BatteryModel.safe_interval and applied inside the bootstrap "
+             "target as well as the greedy policy (stems.baselines.MADCQAgent)",
+    "metaems": "Reptile meta-learning on a shared soft actor-critic with buildings as "
+               "tasks (stems.baselines.MetaEMSAgent)",
+    "mappo-cc": "MAPPO with a critic conditioned on the joint encoded observation -- "
+                "the CTDE comparator that D-MAPPO does not provide, and the arm that "
+                "answers audit D1 (stems.mappo.MAPPOCentralisedCritic)",
+}
+
+#: Comparison controllers that take gradient steps. The MPC pair solves an optimisation
+#: at every control step and has no parameters to fit, so it gets no training budget.
+LEARNING_COMPARISON_POLICIES = frozenset(
+    set(COMPARISON_POLICIES) - {"mpc", "mpc-oracle"})
+
 #: Policies whose builder exists today and that take gradient steps.
-LEARNING_POLICIES = frozenset({"rl"})
+LEARNING_POLICIES = frozenset({"rl"}) | LEARNING_COMPARISON_POLICIES
 
 #: Policies registered as names only. `build_controller` raises NotImplementedError for
-#: each of them, with the reference the implementer needs. Registered now so the
-#: downstream tracks add a builder rather than restructuring ARMS, and so that
+#: each of them, with the reference the implementer needs. Registered so a downstream
+#: track adds a builder rather than restructuring ARMS, and so that
 #: `experiments/ablation.py --arms <name>` fails loudly at build time instead of with a
-#: KeyError that reads like a typo. See CHANGELOG.md step 8.
-PRE_REGISTERED_POLICIES: Dict[str, str] = {
-    "sac": "single-agent SAC over the concatenated district state "
-           "(stems.baselines.SingleAgentSAC exists but is unreachable and, per audit A3, "
-           "would not survive review as written)",
-    "dmappo": "independent PPO with a one-step TD advantage, STEMS Table I "
-              "(stems.baselines.DMAPPOAgent: no GAE, optimiser step inside the epoch "
-              "loop against a fixed old_log_prob, no value clipping, no entropy term)",
-    "mpc": "model-predictive control (stems.baselines.MPCAgent holds price constant "
-           "over the horizon, models the battery as soc + 0.1*sum(u) and ignores load, "
-           "PV, comfort and the cap; re-implement, do not resurrect)",
-    "maddpg": "MADDPG with a centralised critic (stems.baselines.MADDPGAgent)",
-    "marlisa": "MARLISA (stems.baselines.MARLISAAgent augments building i's observation "
-               "with buildings 0..i-1's actions at action-selection time but with the "
-               "stored actions at update time; the sequential structure is not "
-               "reproduced in the update)",
-    "madcq": "MADCQ (stems.baselines.MADCQAgent: 11^3 discrete actions, fixed eps=0.1, "
-             "no replay buffer)",
-    "metaems": "MetaEMS (stems.baselines.MetaEMSAgent is SingleAgentSAC with a 50/50 "
-               "parameter average after two half-batch updates; it is not MAML or "
-               "Reptile)",
-    "mappo-cc": "MAPPO with a genuine centralised critic -- the one comparison that "
-                "answers audit D1, since the live path is parameter-shared independent "
-                "PPO on a graph-encoded observation and not a multi-agent algorithm",
-}
+#: KeyError that reads like a typo. See CHANGELOG.md step 8. The eight comparison
+#: controllers that used to be listed here now have builders and have moved to
+#: COMPARISON_POLICIES; what remains is reserved for the constraint track, which is why
+#: this dict is empty rather than deleted.
+PRE_REGISTERED_POLICIES: Dict[str, str] = {}
 
 #: Constraint mechanisms. "auto" is the historical behaviour; the rest are the clean 2x2
 #: of audit C2 and have no builder yet.
@@ -104,6 +123,11 @@ class Arm:
                 and not self.comfort_barrier
                 and self.degradation == "none")
 
+    @property
+    def is_comparison(self) -> bool:
+        """True for the nine comparison controllers of CHANGELOG.md steps 1-3."""
+        return self.policy in COMPARISON_POLICIES
+
 
 ARMS: Dict[str, Arm] = {a.name: a for a in (
     Arm("idle", "idle", "none"),
@@ -133,12 +157,16 @@ ARMS: Dict[str, Arm] = {a.name: a for a in (
     # NotImplementedError for every one of them. See CHANGELOG.md step 8.
     # ---------------------------------------------------------------------------
 
-    # (a) Eight comparison controllers: the seven STEMS Table I methods, plus MAPPO
-    #     with a genuine centralised critic, which is the one that answers audit D1.
+    # (a) The comparison controllers: the seven STEMS Table I methods, plus MAPPO with
+    #     a genuine centralised critic (audit D1), plus the perfect-foresight MPC that
+    #     pairs with the causal one. Every one carries barrier="calibrated", so each
+    #     sees the identical exact-inverse safety layer and a difference between two of
+    #     them is a difference between algorithms. CHANGELOG.md steps 1-3.
     *(Arm(name, policy, "calibrated") for name, policy in (
         ("sac", "sac"),
         ("dmappo", "dmappo"),
         ("mpc", "mpc"),
+        ("mpc-oracle", "mpc-oracle"),
         ("maddpg", "maddpg"),
         ("marlisa", "marlisa"),
         ("madcq", "madcq"),
@@ -309,6 +337,89 @@ class ShieldedController(PlainController):
             self.fleet_shield.observe(next_obs_list, ev_draw_kwh)
 
 
+class ComparisonController(PlainController):
+    """Adapter: a comparison controller behind the interface the runner trains against.
+
+    ``experiments/runner.py::train`` was written against ``stems.agent.STEMSAgent`` and
+    reads ``elec_idx``, ``control_indices``, ``_last_raw_actions``, ``_last_safe_actions``,
+    ``_last_pre_tanh``, ``_last_log_probs`` and ``_last_nominal_actions`` off the agent
+    it is given. Rather than special-case nine controllers in the loop, this presents
+    those attributes for all of them and forwards ``update``/``save``/``load``.
+
+    It also applies the arm's safety layer, so every comparison arm goes through the
+    *same* projection the reinforcement-learning arms do and the arms stay comparable.
+    For the model-predictive pair the projection is expected to be nearly inactive --
+    they enforce the same bounds inside their own optimisation -- and how often it does
+    intervene is a reported quantity, not an assumption.
+
+    ``_last_pre_tanh`` and ``_last_log_probs`` come from the wrapped learner when it
+    exposes them (the policy-gradient arms do, because an importance ratio needs the
+    behaviour density). For the off-policy and discrete arms they are the ``atanh`` of
+    the action and zero: those learners never read them, and the fields exist only
+    because the collector writes them unconditionally.
+    """
+
+    def __init__(self, base, shield=None, fleet_shield=None, elec_idx: int = 1,
+                 action_dim: int = 3, num_buildings: int = 1,
+                 control_indices: Optional[list] = None) -> None:
+        super().__init__(base)
+        self.shield = shield
+        self.fleet_shield = fleet_shield
+        self.elec_idx = int(elec_idx)
+        self.action_dim = int(action_dim)
+        self.B = int(num_buildings)
+        self.control_indices = (list(range(self.action_dim)) if control_indices is None
+                                else list(control_indices))
+        self.base_policy = None
+        self.request_floor = None
+        z = np.zeros((self.B, self.action_dim), dtype=np.float32)
+        self._last_raw_actions = z.copy()
+        self._last_nominal_actions = z.copy()
+        self._last_safe_actions = z.copy()
+        self._last_pre_tanh = z.copy()
+        self._last_log_probs = np.zeros(self.B, dtype=np.float32)
+
+    def select_action(self, obs_list, history=None, explore: bool = False) -> np.ndarray:
+        raw = self._base_action(obs_list, history, explore)
+        self._last_raw_actions = raw.copy()
+        self._last_nominal_actions = raw.copy()
+        safe = raw if self.shield is None else np.clip(
+            self.shield.project(raw, obs_list), -1.0, 1.0).astype(np.float32)
+        if self.fleet_shield is not None:
+            safe = self.fleet_shield.project(safe, obs_list)
+        self._last_safe_actions = safe.copy()
+        # Copies, not references. The collector stores whatever object it is handed and
+        # keeps it for the whole episode, so passing a buffer a learner reuses would
+        # make every stored row alias the last step.
+        self._last_pre_tanh = np.array(
+            getattr(self.base, "_last_pre_tanh",
+                    np.arctanh(np.clip(raw, -1.0 + 1e-6, 1.0 - 1e-6))),
+            dtype=np.float32, copy=True)
+        self._last_log_probs = np.array(
+            getattr(self.base, "_last_log_probs", np.zeros(self.B)),
+            dtype=np.float32, copy=True)
+        if hasattr(self.base, "notify_executed"):
+            self.base.notify_executed(safe)
+        return safe
+
+    def observe(self, next_obs_list, ev_draw_kwh=None) -> None:
+        if hasattr(self.base, "observe"):
+            self.base.observe(next_obs_list, ev_draw_kwh)
+        if self.fleet_shield is not None and ev_draw_kwh is not None:
+            self.fleet_shield.observe(next_obs_list, ev_draw_kwh)
+
+    def update(self, batch):
+        return self.base.update(batch) if hasattr(self.base, "update") else {}
+
+    def save(self, path: str) -> None:
+        if hasattr(self.base, "save"):
+            self.base.save(path)
+
+    def load(self, path: str) -> None:
+        if hasattr(self.base, "load"):
+            self.base.load(path)
+
+
 def safety_layer(barrier: str, env):
     from stems.battery import BatteryModel
     from stems.config import SafetyConfig
@@ -363,6 +474,115 @@ def _refuse_unimplemented(arm: Arm) -> None:
             "discharge ageing wired as both a reward term and a constraint. Today "
             "degradation is counted as the KPI battery_equivalent_full_cycles and "
             "nothing acts on it.")
+
+
+#: Episode length used to record the perfect-foresight tape when the caller does not
+#: say. 8760 covers a full year at one hour per step, which is the longest window
+#: `experiments/scenario.py` can ask for.
+ORACLE_TAPE_STEPS = 8760
+
+
+def _build_comparison(arm: Arm, env, config, battery_model, battery, ev_indices, fleet):
+    """One of the nine comparison controllers, wrapped in the arm's safety layer."""
+    from stems.cbf import CBFShield
+
+    B, A = env.num_buildings, env.action_dim
+    obs_dim = env.obs_dim
+    shield = None
+    if arm.barrier != "none":
+        shield = CBFShield(config.cbf, B, battery_model=battery_model,
+                           nominal_power=battery["nominal_power"],
+                           action_scale=config.training.action_scale,
+                           elec_idx=env.electrical_storage_action_index,
+                           safety_cfg=config.safety, enforce_soc=True,
+                           hvac_idx=env.hvac_action_index)
+
+    if arm.policy in ("mpc", "mpc-oracle"):
+        base = _build_mpc(arm, env, config, shield)
+    elif arm.policy == "sac":
+        from stems.baselines import SingleAgentSAC
+        base = SingleAgentSAC(obs_dim, A, num_buildings=B)
+    elif arm.policy == "dmappo":
+        from stems.baselines import DMAPPOAgent
+        base = DMAPPOAgent(obs_dim, A, num_buildings=B,
+                           gae_lambda=config.training.gae_lambda,
+                           clip_eps=config.training.ppo_clip,
+                           ppo_epochs=config.training.update_epochs,
+                           minibatch_size=config.training.minibatch_size,
+                           entropy_coef=config.training.entropy_coef,
+                           target_kl=config.training.target_kl,
+                           gamma=config.actor_critic.gamma)
+    elif arm.policy == "maddpg":
+        from stems.baselines import MADDPGAgent
+        base = MADDPGAgent(obs_dim, A, num_buildings=B, gamma=config.actor_critic.gamma)
+    elif arm.policy == "marlisa":
+        from stems.baselines import MARLISAAgent
+        base = MARLISAAgent(obs_dim, A, num_buildings=B, gamma=config.actor_critic.gamma)
+    elif arm.policy == "madcq":
+        from stems.baselines import MADCQAgent
+        base = MADCQAgent(obs_dim, A, num_buildings=B, gamma=config.actor_critic.gamma,
+                          soc_min=config.cbf.SOC_min, soc_max=config.cbf.SOC_max,
+                          battery_model=env.battery_model(),
+                          elec_idx=env.electrical_storage_action_index)
+    elif arm.policy == "metaems":
+        from stems.baselines import MetaEMSAgent
+        base = MetaEMSAgent(obs_dim, A, num_buildings=B, gamma=config.actor_critic.gamma)
+    elif arm.policy == "mappo-cc":
+        from stems.graph import BuildingGraph
+        from stems.mappo import MAPPOCentralisedCritic
+        info = env.get_building_info()
+        config.graph.mode = arm.graph_mode
+        graph = BuildingGraph(B, info["positions"], info["features"], config.graph)
+        base = MAPPOCentralisedCritic(
+            obs_dim, A, B, graph, config=config,
+            electrical_storage_action_index=env.electrical_storage_action_index)
+    else:
+        raise ValueError(f"unknown comparison policy {arm.policy!r}")
+
+    controller = ComparisonController(
+        base, shield=shield, fleet_shield=fleet(shield) if shield is not None else None,
+        elec_idx=env.electrical_storage_action_index, action_dim=A, num_buildings=B)
+    return controller
+
+
+def _build_mpc(arm: Arm, env, config, shield):
+    """The receding-horizon or the perfect-foresight model-predictive controller.
+
+    The two differ only in the forecaster. The oracle's tape is recorded by rolling the
+    *same* environment once with the zero action and then resetting it, which is sound
+    because ``STEMSEnvironment.reset`` restarts the CityLearn episode from the window's
+    first step; ``tests/test_mpc.py::test_resetting_after_the_oracle_tape_restores_the_environment``
+    pins that the observations after the reset are identical to the ones before the
+    recording, so the tape costs nothing but time.
+    """
+    from stems.forecast import CausalForecaster, record_idle_episode
+    from stems.mpc import DEFAULT_HORIZON_H, StorageMPC
+
+    B = env.num_buildings
+    tank = None
+    if env.dhw_action_index >= 0 and not env.using_mock:
+        tank = env.dhw_tank_model()
+    battery = env.battery_model()
+    if arm.policy == "mpc-oracle":
+        (start, end), = env.env_kwargs.get("episode_time_steps", [(0, ORACLE_TAPE_STEPS - 1)])
+        forecaster = record_idle_episode(env, int(end - start + 1))
+        env.reset()
+    else:
+        forecaster = CausalForecaster(B, battery, tank,
+                                      env.electrical_storage_action_index,
+                                      env.dhw_action_index)
+    soc_lo, soc_hi = ((config.cbf.SOC_min, config.cbf.SOC_max) if shield is None
+                      else (float(np.max(shield.enforced_soc_bounds()[0])),
+                            float(np.min(shield.enforced_soc_bounds()[1]))))
+    return StorageMPC(
+        B, env.action_dim, battery, tank, forecaster,
+        elec_idx=env.electrical_storage_action_index,
+        dhw_idx=env.dhw_action_index, hvac_idx=env.hvac_action_index,
+        hvac_control=env.hvac_control, horizon=DEFAULT_HORIZON_H,
+        soc_min=soc_lo, soc_max=soc_hi,
+        dhw_soc_cap=config.thermal.dhw_soc_cap,
+        dhw_action_bound=env.dhw_info()["action_bound"],
+        p_grid_max=config.cbf.P_grid_max, p_building_max=config.cbf.P_building_max)
 
 
 def build_controller(arm: Arm, env, config):
@@ -433,6 +653,10 @@ def build_controller(arm: Arm, env, config):
             agent.request_floor = ChargerFloor(env.action_dim, ev_indices[0],
                                                env.ev_obs_layout()[0], arm.ev_floor)
         return agent
+
+    if arm.is_comparison:
+        return _build_comparison(arm, env, config, battery_model, battery, ev_indices,
+                                 fleet)
 
     if arm.policy == "idle":
         base = IdlePolicy(B, env.action_dim)

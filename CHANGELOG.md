@@ -779,3 +779,449 @@ test-editing rule: the alternative was to paste twenty-four names that deliberat
 not run into an inventory of arms that do, which would make that test a list of things
 that are not there. The pre-registered names are inventoried by the new file instead,
 and the scoped test still fails the moment an *implemented* arm is added or changed.
+
+---
+
+# Baselines track — branch `methods/baselines`
+
+Nine comparison controllers: the seven methods of the STEMS paper's Table I, ported to
+reference implementations; a model-predictive pair, causal and perfect-foresight; and
+MAPPO with a centralised critic. Audit finding ids refer to `docs/AUDIT_2026-10-06.md`.
+
+**Test floor.** The brief gave the floor as "419 passing, 0 failed". In this worktree
+the suite collects 419 and reports **404 passed, 15 skipped, 0 failed** before any edit
+of mine (`python -m pytest -q`, 123.75 s). The fifteen skips are all dataset
+availability, not failures: ten in `tests/test_env_widening.py` skip because the
+generated schema `citylearn_challenge_2022_phase_all_plus_evs` is not present, and five
+in `tests/test_ev_real.py` skip because fetching the CityLearn electric-vehicle dataset
+returns HTTP 403 from the GitHub API (rate limit) from this machine. So the floor I was
+asked to hold is 419 *collected*; the floor I can actually hold is 404 passed, 0 failed,
+and that is the number every figure below is measured against.
+
+**Nothing here was trained.** The learning arms are built, validated and left at their
+initialisation. Every number below comes either from the synthetic mock environment
+(known-answer tests) or from short rollouts on `citylearn_schemas/tx_travis_8b`.
+
+---
+
+## Step 1 — Port the seven STEMS Table I controllers
+
+**What.** `stems/baselines.py` rewritten below `RuleBasedAgent`, which is untouched.
+`SingleAgentSAC`, `DMAPPOAgent`, `MADDPGAgent`, `MARLISAAgent`, `MADCQAgent` and
+`MetaEMSAgent` are now reference implementations; `MPCAgent` is a name that raises and
+points at `stems/mpc.py` (step 2).
+
+| arm | what it now implements | named deviation |
+|---|---|---|
+| `sac` | Soft actor-critic (Haarnoja et al. 2018) with automatic temperature tuning, twin target critics, replay. One agent over the **concatenated** district observation and joint action; reward is the district sum. | — |
+| `dmappo` | Independent PPO per building on local observations (DTDE): GAE, clipped surrogate, clipped value loss, entropy bonus, advantage standardisation, approximate-KL early stop. | — |
+| `maddpg` | MADDPG (Lowe et al. 2017): deterministic local actors, per-agent critic on the joint observation and action, target networks, replay. | Gaussian exploration noise with geometric decay instead of the paper's Ornstein–Uhlenbeck process. |
+| `marlisa` | MARLISA (Vázquez-Canteli, Henze, Nagy 2020): soft actor-critic with iterative sequential action selection, plus information sharing. | **"MARLISA with measured sharing".** The paper shares each building's *predicted* consumption from an online regressor. No source in `docs/LITERATURE.md` specifies that regressor's form or fitting protocol, so the shared signal here is the *measured current* `net_electricity_consumption`, which the observation already carries. |
+| `madcq` | Constrained Q-learning (Kalweit et al. 2020) — the maximisation runs over a safe action set in **both** the greedy policy and the bootstrap target — over a branching architecture (Tavakoli et al. 2018), with Double DQN (van Hasselt et al. 2016), replay, a target network and linearly decayed ε. | **The name could not be resolved.** No entry in `docs/LITERATURE.md` maps "MADCQ" to a paper, so this is reported as the constrained-Q family described, not as a reproduction of an unidentified source. |
+| `metaems` | Reptile (Nichol et al. 2018) on a shared soft actor-critic, with an `adapt` method for test-time adaptation. | **"Reptile-SAC, buildings as tasks".** Meta-learning needs a task distribution and the STEMS row's could not be identified. A task here is a building: the eight differ in battery capacity (5.0–16.2 kWh), nominal power (1.61–5.0 kW), tank capacity and photovoltaic rating. |
+
+**Why.** Audit A3. Each of the seven was exported from `stems/__init__.py`, instantiated
+by no experiment, and as written would have been a strawman in a comparison table.
+
+**The specific defects, and where each is now pinned.**
+
+1. *MPC held price constant over its horizon, was battery-only, used a hard-coded 0.1
+   state-of-charge rate, and had no load, photovoltaic, comfort or cap model.* Replaced
+   wholesale (step 2). `tests/test_baseline_controllers.py::test_the_mpc_agent_name_refuses_rather_than_resurrecting_the_old_one`.
+2. *D-MAPPO used a one-step temporal-difference residual as its advantage.* Now GAE;
+   `stems/baselines.py::_gae`.
+3. *D-MAPPO stepped the optimiser inside the epoch loop against an `old_log_prob`
+   recomputed from the already-updated actor.* The behaviour log-probability now comes
+   from the trajectory and is fixed for the whole update.
+   `test_dmappo_uses_the_behaviour_log_probability_from_the_trajectory` asserts the
+   approximate KL of the first minibatch is below 1e-4 (not zero: the behaviour
+   log-probability was computed on a one-row tensor and is recomputed on an 80-row one,
+   and float32 matrix multiplication is not associative; a *recomputed* old
+   log-probability gives a KL two or more orders of magnitude larger).
+4. *D-MAPPO subtracted a "CBF penalty" computed from `soc + 0.1 * action`.* Deleted.
+   `test_dmappo_has_no_hard_coded_battery_model`.
+5. *MADCQ discretised to 11³ = 1331 joint actions with fixed ε and no replay buffer.*
+   Now 3 × 11 = 33 branched outputs, decayed ε, replay, Double DQN, and the safe set
+   from `BatteryModel.safe_interval`. `test_madcq_does_not_enumerate_the_joint_action_space`
+   (33 < 1331) and `test_madcq_never_proposes_an_action_outside_the_safe_set` (worst
+   excursion beyond the exact plant's feasible interval ≤ 0.02, a tenth of a bin width).
+6. *MARLISA augmented with same-timestep actions when acting and stored actions when
+   updating.* One `augment` function serves both paths, and both augmented vectors are
+   built at collection time, where step *t+1* is available, and stored in the replay
+   buffer. `test_marlisa_builds_the_same_augmentation_when_acting_and_when_updating`.
+7. *MetaEMS was SAC with a 50/50 parameter average and was not MAML or Reptile.* Now
+   Reptile over buildings-as-tasks with a fresh inner optimiser per task.
+   `test_metaems_is_reptile_over_more_than_one_task`.
+
+### 1.1 Two bugs found by the known-answer tests, and what actually caused what
+
+The known-answer test is the one from `tests/test_learning.py`: pay
+`r = -4(a_h - 0.6)² - 4(a_e + 0.3)²`, train briefly, require the deterministic policy to
+move toward `(+0.6, -0.3)`. Three changes were made while chasing two failures, and they
+are recorded separately because two of them were *not* the fix.
+
+**Observation normalisation (`_ObsNorm`), real effect measured.** The observation vector
+mixes an hour index in 1..24, temperatures near 20 °C, irradiance in hundreds of W/m²
+and a state of charge in [0, 1]; none of the ported learners normalised it, while
+`stems/agent.py::STEMSAgent` always has. Effect on the single-agent soft-actor-critic
+arm: from `a_e = -0.089` after 14 episodes (short of the test threshold) to
+`(a_h, a_e) = (+0.93, -0.83)` after 12. Effect on the proximal-policy arm: **none** —
+still `a_h = -0.002`. Kept because it is right on its own merits and makes the arms
+comparable on input scaling, not because it fixed anything.
+
+**Return scaling in `DMAPPOAgent`, no measured effect on the failure.** Added for the
+same reason `STEMSAgent` has it (the critic starts wrong by the magnitude of the
+discounted return, order 300 on an 80-step episode). Measured with the real bug still
+present: `a_h = +0.072` at episode 40 without it, `+0.024` at episode 20 with it. Kept
+on its own merits; it was not the fix.
+
+**The actual bug: an aliased behaviour buffer.** `DMAPPOAgent.select_action` filled one
+reusable `_last_pre_tanh` array in place. The trajectory collector stores the reference
+it is handed, so every transition in the episode held *the same array object* and
+therefore the last step's pre-squash sample. The importance ratio was computed against
+one draw repeated N times and the policy gradient carried no per-step signal. Shapes
+were right, losses moved, nothing else showed it. After allocating fresh arrays per
+call: `a_h` went from `-0.002` to `+0.169` at the same budget, and the arm passes at
+twice the episodes. `tests/test_baseline_controllers.py::test_the_stored_behaviour_samples_are_not_all_the_same_object`
+is parameterised over all seven learning arms and checks both that the object identities
+differ across steps and that the stored samples actually vary. `ComparisonController`
+now copies defensively as well.
+
+**Evidence.** `tests/test_baseline_controllers.py`, 40 cases, all passing: every arm
+builds and acts inside `[-1, 1]`; every arm presents the attributes
+`experiments/runner.py::train` reads; six arms reach the known optimum and the seventh
+(`metaems`) reduces its distance to it by more than 40% — stated as a paired reduction
+rather than an absolute threshold because Reptile's landing point after a fixed budget
+is noisy.
+
+---
+
+## Step 2 — The model-predictive pair
+
+**What.** `stems/mpc.py::StorageMPC` and `stems/forecast.py`. One controller class; the
+two arms differ **only** in which forecaster is plugged in, so a difference between them
+is a forecast effect and nothing else (`tests/test_mpc.py::test_the_two_mpc_arms_differ_only_in_the_forecaster`).
+
+* `mpc` — receding horizon, `CausalForecaster`: the current observation and a rolling
+  24-step window, which is exactly the reinforcement-learning agent's information set.
+* `mpc-oracle` — `OracleForecaster`: replays a recording of the identical environment.
+
+`mpc-oracle` is a **new arm name**, added to `ARMS`. The dict was not restructured; the
+perfect-foresight controller is a second controller, not a mode of the first, and
+registering it as its own arm keeps the run records separable.
+
+**Formulation.** Decision variables per building per step: battery charge and discharge
+fractions, hot-water tank charge and discharge fractions, and grid import. Objective is
+the import bill over the horizon at the real price series, plus heavily weighted slacks.
+Constraints: the import definition, the per-building cap, the district cap, the
+state-of-charge band, and a terminal condition requiring the battery to be handed back
+at least as charged as it was found. Solved with HiGHS through cvxpy, with the problem
+compiled once and only its parameters updated per step.
+
+**Comfort and the heat pump.** The heat pump is not a decision variable, and this is a
+limitation of the testbed rather than of the formulation. In `hvac_control="setpoint"`
+— the scenario default — `STEMSEnvironment.step` overwrites the controller's heat-pump
+column with a thermostat loop regardless, so the only lever is a set-point shift, and
+predicting its effect requires an indoor-temperature model, which here means CityLearn's
+learned dynamics. `docs/REPORT_2026-10.md` §2 shows those are not physical. An MPC
+optimising against them would report a comfort result that is an artefact of the
+surrogate. The comfort band is therefore held by the same proportional thermostat every
+other arm uses, the heat pump's electricity enters the optimisation inside the forecast
+base load, and in `hvac_control="power"` the MPC runs that identical thermostat itself
+so the heat pump behaves the same under every arm.
+
+### 2.1 Price forecast leads: measured, not assumed
+
+`electricity_pricing_predicted_1` and `_predicted_2` reproduce the realised price at
+**t + 6 h** and **t + 12 h** with a mean absolute error of **0.00000** currency/kWh over
+300 steps on `tx_travis_8b`; every other lead in {1, 2, 3, 6, 12, 24} h is off by ≥ 0.07.
+The tariff has exactly three levels (0.22, 0.40, 0.54 currency/kWh) and a 24 h period.
+`CausalForecaster` is therefore exact at leads 0, 6 and 12, and holds the last known
+level between anchors rather than interpolating — a linear interpolation of a step
+tariff invents prices the tariff never charges.
+`tests/test_mpc.py::test_the_causal_forecaster_uses_the_price_leads_it_is_given`.
+
+### 2.2 The base load is measured by subtraction, not composed from parts
+
+The quantity the MPC cannot change is defined as
+`base = net_electricity_consumption − battery terminal energy − tank electricity`, both
+storage terms from the exact models at the pre-step states and the applied action.
+Measured against the alternative of composing it from
+`non_shiftable_load − solar_generation + dhw_demand/efficiency + heating_electricity`:
+
+| decomposition | residual mean [kW] | residual s.d. [kW] | worst \|residual\| [kW] |
+|---|---|---|---|
+| by subtraction (used) | 0.055 | 0.623 | 5.49 |
+| composed from parts | 0.010 | 1.198 | 7.32 |
+
+(mean \|net\| over the same window = 2.993 kW, eight buildings, 120 steps). The
+subtraction form predicts the realised net consumption of a random-action rollout with
+*R*² = 0.964, so it is the one used, and its 0.62 kW residual is reported rather than
+hidden: it is unmodelled hot-water coupling, because discharging the tank changes how
+much the heater must make up on later steps.
+
+### 2.3 The oracle is a perfect-foresight reference for the exogenous signals only
+
+Its tape is recorded by rolling the same environment once with the zero action
+(`record_idle_episode`). Price and hot-water draw are exogenous, so the recording gives
+them exactly. The base load is the *idle counterfactual*, which is not exactly what the
+oracle's own trajectory will produce — the gap is the 0.62 kW above. Stated in the class
+docstring and here rather than presented as an exact oracle. Per
+`docs/LITERATURE.md` §10, a perfect-foresight oracle could not be established as field
+convention, so it is presented as **our** choice of reference point.
+
+The tape costs one extra episode and no correctness:
+`tests/test_mpc.py::test_resetting_after_the_oracle_tape_restores_the_environment` checks
+that every building's observation after the post-recording reset is bit-identical to the
+one before the recording.
+
+### 2.4 Planning in state of charge, not in action
+
+The exact plant is nonlinear, so the linear programme needs an affine model. The first
+version used a secant through the idle, full-charge and full-discharge corners and
+treated the solution as a normalised action. That is wrong at the state-of-charge band,
+and the test said so by how much: the battery saturates as it fills, the true next state
+of charge is concave in the command, and the secant sits below it, so a trajectory
+constrained to `[0.2, 0.8]` left the band by **0.025** and the secant itself was off by
+up to **0.110** across the eight real batteries.
+
+The controller now plans a *state-of-charge trajectory*, and
+`BatteryModel.action_for_soc` / `TankModel.action_for_soc` invert the exact model by
+bisection to find the command that realises each step. The band constraint is then exact
+(`test_the_planned_state_of_charge_is_reachable_exactly`: worst miss < 1e-6), and only
+the *cost* model stays approximate. Sequential linear programming refits the energy
+coefficients at the operating point the previous pass chose; after convergence the
+energy the optimiser charges itself for the first step agrees with what the exact plant
+draws to within 1% (`test_the_energy_coefficients_converge_on_the_operating_point`).
+`test_reading_the_plan_as_a_raw_action_would_leave_the_band` and
+`test_the_secant_state_of_charge_model_would_not_have_been_good_enough` pin both of the
+measured failures above, so the design choice is justified by numbers and will fail
+loudly if the plant ever changes enough to make it unnecessary.
+
+`TankModel` gained `next_soc` and `action_for_soc`, both factored out of the arithmetic
+`drawn_kwh` already performed and discarded, so the tank's state and its electricity
+cannot be described by two different implementations.
+
+---
+
+## Step 3 — MAPPO with a centralised critic
+
+**What.** `stems/mappo.py::MAPPOCentralisedCritic`, arm `mappo-cc`. Yu et al. (2022):
+parameter-shared actors on local information, one critic on the joint state, GAE,
+clipped surrogate, entropy bonus, approximate-KL early stop, observation and return
+normalisation.
+
+**What the critic conditions on.** The shared spatio-temporal encoder
+(`stems/encoder.py::STEncoder`, the same class `STEMSAgent` uses) maps the *B* current
+observations and their 24-step histories to a representation matrix *R* ∈ ℝ^(B×d). The
+actor reads row *R_i* — local information after graph mixing, exactly what `STEMSAgent`'s
+actors read, so the two are comparable. The critic reads the **concatenation of every
+row**, *s* = vec(*R*) ∈ ℝ^(Bd), and returns one value per building from a single head:
+the agent-specific global state of Yu et al. Concatenation rather than a
+permutation-invariant pool is deliberate — the buildings have different device sizes and
+the critic is allowed to know which is which.
+
+**How it differs from D-MAPPO.** D-MAPPO's critic for building *i* is
+*V_i*(*o_i*) — a separate network per building reading only that building's own raw
+observation. Nothing in it can represent the shared import limit. `mappo-cc`'s critic is
+*V*(*s*) over the joint encoded observation. That is the only structural difference
+between the two arms: both are on-policy PPO with the same clipping, the same GAE, the
+same entropy bonus and the same safety layer.
+
+**Why it is the arm that settles the question for us.** `docs/LITERATURE.md` has Khouja
+et al. (2026) reporting decentralised beating centralised on CityLearn *without* a
+district cap, and Shojaeighadikolaei et al. (2024) reporting a centralised critic
+helping when electric vehicles share a transformer. The clean 2×2 — one algorithm, one
+environment, cap on and off, DTDE and CTDE in each cell — appears in no retrieved source.
+
+**A caveat for whoever runs that 2×2.** On `tx_travis_8b` with eight buildings the
+uncontrolled district peak import is **39.6 kW** against the default
+`grid_cap_kw = 300`. The cap is not binding, so the "cap on" column would be identical
+to the "cap off" column and the experiment would measure nothing. The cap has to be set
+near the uncontrolled peak for the coupling to exist. Recorded in the module docstring
+as well, because it is the kind of thing that is discovered after the grid has run.
+
+---
+
+## Step 4 — Validation, and what it caught
+
+**What.** `experiments/validate_controllers.py` is the eligibility gate. For every arm
+it runs a rollout on the real environment, applies
+`experiments/runner.py::ActuatorEvidence` — which correlates commands against what the
+devices actually did — and times `select_action`. Learning arms are driven with
+exploration on, because an untrained deterministic policy can emit a near-constant
+command and the check then cannot separate "the actuator is dead" from "the command
+never varied". Output: `experiments/diagnostics/controller_validation/validation.json`.
+
+### 4.1 The gate caught two bugs that no known-answer test could have
+
+Both were in the model-predictive controller, both were invisible to every test that
+looks only at states of charge or at plan optimality, and both were found by looking at
+what the controller actually commanded over a real rollout.
+
+**Bug 1: the hot-water command was pinned at −1.000 for all 960 building-steps.**
+`action_for_soc` bisected over the whole action interval for the action achieving a
+target state of charge. But `next_soc` is *flat* in the action wherever the device
+cannot move energy, and the tank is the acute case: it discharges only into an actual
+hot-water draw, so with no draw its next state of charge is identical for every
+non-positive action. A plain bisection converges to an end of that flat region — a
+full-discharge command, issued every step, for a tank that cannot discharge. It changed
+nothing in the model, which is why it was silent. Fixed by bracketing around zero
+(`stems/battery.py::_bisect_toward_zero`): the returned action is the
+smallest-magnitude one achieving the target, so a target that idling already reaches
+maps to exactly 0. Pinned by `tests/test_mpc.py::test_the_plant_inverse_returns_the_idle_command_on_a_flat_region`
+and `::test_the_mpc_does_not_hold_the_hot_water_command_at_an_extreme`.
+
+**Bug 2: the tank was then never used at all — a self-confirming fixed point.** With
+the inverse fixed, the hot-water command became exactly 0.000 at every step. The cause:
+`_tank_corners` read the discharge coefficient at the *current* state of charge. The
+tank model's one-step drop is min(draw/η, stored)/C — a *rate* limit from the draw and
+an *energy* limit from what is stored — and reading both at the current state conflates
+them. An empty tank reports that discharging is worth nothing, so the optimiser never
+charges it, so it stays empty. Measured: `gd_t` was identically zero at every step of a
+200-step rollout even with 1.4 kWh of forecast draw inside the horizon. Fixed by
+evaluating the discharge *rate* at a reference state holding enough energy and leaving
+the energy limit to the linear programme, where it already is as soc ≥ 0. After the
+fix, over the same 200 steps: hot-water commands span [−1.000, +0.751], tank state of
+charge reaches 0.933 with a mean of 0.232, and the cost saving against doing nothing is
+7.71%.
+
+Neither bug would have been caught by a known-answer test on the plan, and the first
+would not have been caught by any test of the state-of-charge band. The gate exists
+because of this class of defect.
+
+### 4.2 Eligibility
+
+Window: 336 steps (two weeks) on `citylearn_schemas/tx_travis_8b`, eight buildings,
+winter, seed 0. Every arm below reaches `verified = True`: battery, hot-water and
+heat-pump channels all respond to their commands.
+
+| arm | verified | battery | hot water | heat pump | median ms/step | p95 ms/step |
+|---|---|---|---|---|---|---|
+| `idle+calibrated` | **None** | None | None | True | 1.671 | 1.769 |
+| `rbc+calibrated` | True | True | True | True | 1.714 | 1.749 |
+| `sac` | True | True | True | True | 1.937 | 2.086 |
+| `maddpg` | True | True | True | True | 2.033 | 2.200 |
+| `mappo-cc` | True | True | True | True | 2.311 | 2.454 |
+| `dmappo` | True | True | True | True | 2.588 | 2.794 |
+| `metaems` | True | True | True | True | 2.692 | 2.897 |
+| `marlisa` | True | True | True | True | 2.785 | 2.972 |
+| `rl+calibrated` | True | True | True | True | 3.090 | 3.332 |
+| `madcq` | True | True | True | True | 4.109 | 4.313 |
+| `mpc` | True | True | True | True | 75.291 | 77.518 |
+| `mpc-oracle` | True | True | True | True | 75.311 | 77.919 |
+
+**Nine comparison controllers are eligible. None failed.** The only `None` is
+`idle+calibrated`, which is an incumbent arm, not one of mine: it commands nothing by
+definition, so there is no contrast to correlate and the check correctly answers
+"cannot tell" rather than "broken". That is worth stating plainly, because it shows
+`None` is not a synonym for failure — the eligibility rule has to be *`False` fails*,
+with `None` reported together with the reason, or the repository's own do-nothing
+reference would be disqualified.
+
+**A knife-edge worth recording.** On a 168-step window the causal `mpc` returned
+`verified = None`, because its hot-water channel produced 19 charging samples against
+the check's minimum of 20 (`mpc-oracle` had 23 and passed). Nothing was wrong with it;
+the window was too short for a controller that uses the tank sparingly. The window was
+doubled to 336 steps and both pass. Recorded because "the gate said None" and "the gate
+said None because it was one sample short" are different facts, and only the second is
+true here.
+
+### 4.3 Computation time per control step
+
+Reported because this literature reports it: [maier2023approximating] matches a
+rule-based controller at 15% of an MPC's compute. The measurement is around
+`select_action` only — environment stepping and metric bookkeeping are excluded, and
+are identical across arms. Single-threaded on CPU, `OMP_NUM_THREADS=4`.
+
+The learning arms cost **1.9–4.1 ms** per control step, within a factor of 2.4 of the
+rule-based controller's 1.71 ms, and the repository's own agent sits mid-range at
+3.09 ms. The model-predictive pair costs **75.3 ms**, about **44 times** the rule-based
+controller and **24 times** the STEMS agent — a 12-hour horizon, eight buildings, two
+storage devices each, and two sequential-linear-programming passes per step. Put the
+other way round, and in the form that literature uses: the rule-based controller runs
+at **2.3%** of the MPC's computation time. All of it is solver time; the problem is
+compiled once by cvxpy and only its parameters are updated per step, so this is the
+cost of 2 HiGHS solves, not of rebuilding the model.
+
+### 4.4 Every exported controller is reachable from `ARMS`
+
+Audit A3's "exported but unreachable" finding is now checkable in both directions.
+`stems/__init__.py` declares `CONTROLLERS_REACHABLE_FROM_ARMS`, and
+`tests/test_controller_reachability.py` (24 cases) asserts that the declaration matches
+`stems.__all__`, that every arm it names exists, that every exported controller is
+actually constructed by some arm's builder, that the nine comparison arms build nine
+distinct implementations (the MPC pair sharing one class by design), and that each
+carries a substantive docstring. `MPCAgent` is no longer exported.
+
+---
+
+## Tests changed, and why
+
+Three test files were edited to accommodate changes. Recording each under the
+test-editing rule.
+
+**`tests/test_preregistered_arms.py`.** Step 8 registered 24 arm names and asserted
+that every one reports `implemented is False` and raises `NotImplementedError`. Eight
+of them are what this track was asked to build, so that assertion is the exact
+statement the work falsifies. `ALL_PRE_REGISTERED` is now the 16 arms still reserved
+for the constraint track (12 mechanism cells, 2 comfort, 2 degradation), and
+`test_the_comparison_controllers_cover_table_one_plus_the_two_arms_it_lacked` asserts
+the opposite of what it used to: that all nine now resolve to controllers, are absent
+from `PRE_REGISTERED_ARMS`, and carry a description. What the old test pinned that
+still matters — the names exist, MAPPO with a centralised critic is distinct from
+D-MAPPO, each carries a note — is pinned against `COMPARISON_POLICIES` instead.
+
+`test_learning_arms_are_unchanged_by_the_new_policies` asserted `learns is False` for
+all eight, with the stated reason "until it has a builder". They have builders now, and
+seven of them take gradient steps; leaving `learns` False would put a
+randomly-initialised network into a comparison table, which is the strawman this track
+exists to remove. It is now
+`test_the_learning_comparison_arms_now_ask_for_a_training_budget`, which requires
+`learns` True for the seven learners and False for the model-predictive pair.
+
+**`tests/test_experiments.py::test_the_ablation_arms`.** This is an inventory of the
+arms that have a builder, so implementing nine of them necessarily changes it. The nine
+were added to the expected mapping and the seven learners to the expected `learns`
+list, with an explicit assertion that `mpc` and `mpc-oracle` remain non-learning. No
+assertion was weakened: the test still fails if an implemented arm is added or changed
+without updating it.
+
+**`ARMS` gained one entry, `mpc-oracle`.** The dict was not restructured. The brief
+named two model-predictive controllers and the registry had one name; a perfect-
+foresight controller is a second controller, not a mode of the first, and separate arm
+names keep its run records separable from the causal arm's.
+
+---
+
+## What this track disputes
+
+1. **The test floor is 404 passed, 15 skipped, not 419 passed.** Measured before any
+   edit; the 15 skips are dataset availability on this machine (a missing generated
+   electric-vehicle schema, and an HTTP 403 rate limit from the GitHub API). 419 is the
+   collected count.
+2. **The MPC horizon is 12 h, not the 24 h the tariff-period argument gives.** The
+   argument was mine and the sweep overruled it: both forecasters saturate at 12 h, the
+   causal arm is slightly *worse* at 24 h, and 24 h costs 1.9 times the solve time.
+3. **`verified = None` must not be read as failure.** The incumbent `idle+calibrated`
+   arm returns `None` by construction. The eligibility rule is `False` fails; `None` is
+   reported with its reason.
+
+## What is not done, and should not be assumed
+
+* **Nothing was trained.** Every learning arm is validated at its initialisation. The
+  known-answer tests show each one can optimise a stationary objective on the mock
+  environment; they say nothing about performance on CityLearn.
+* **No comparison table exists yet**, and none should be made from these numbers. The
+  cost figures here come from single-seed rollouts of 168–336 steps, used to validate
+  controllers, not to rank them.
+* **The district cap does not bind in the default scenario** (39.6 kW uncontrolled peak
+  against a 300 kW cap), so the centralised-versus-decentralised question `mappo-cc`
+  exists to answer cannot be asked at that setting.
+* **A cost-only MPC raises peak demand** when the cap is slack — by up to 58% over
+  doing nothing in the sweep. Any table reporting peak demand must set the cap near the
+  uncontrolled peak, or this arm will look bad for a reason unrelated to model-
+  predictive control.
+* **`MARLISA`, `MADCQ` and `MetaEMS` are named variants, not reproductions.** Their
+  defining sources could not be verified against `docs/LITERATURE.md`; what was
+  implemented is described above and must be reported under those descriptions.
