@@ -1716,3 +1716,243 @@ edited rather than added to, as recorded in step 4.6.
   stubbed.
 * **No `p > 0` default for the depth-of-discharge term**, and no calendar-ageing rate.
   Both would be unsourced numbers inside a constraint.
+
+---
+
+# Framework phase — guarantees track (`framework/guarantees`)
+
+Entry floor, confirmed before the first edit: `python -m pytest tests/ -q` →
+**538 passed, 0 failed, 0 skipped**, 1 warning, 296.86 s, 538 collected.
+
+**The brief's floor of "538 passed / 0 failed / 0 skipped" is not reproducible on
+demand, and that is a property of the environment, not of the code.** Three runs of the
+identical command on this worktree, in order:
+
+| run | result | cause of the skips |
+| --- | --- | --- |
+| before any edit, 1st | 524 passed, 14 skipped | CityLearn dataset not yet fetched into `XDG_CACHE_HOME` |
+| before any edit, 2nd | **538 passed, 0 skipped** | cache warm |
+| after this track's edits | 546 passed, 14 skipped | GitHub API 403, rate limit exceeded |
+
+The 14 skips are the CityLearn-dataset guards in `test_env_widening`, `test_ev_real`,
+`test_ev_schema`, `test_mpc`, `test_thermal`, `test_constraint_mechanisms` and
+`test_experiments`. In the third run every skip reason is the same upstream failure:
+`Unable to get response from GitHub API ... Returned status code: 403 ... API rate limit
+exceeded`, raised by CityLearn's dataset resolver, which queries
+`api.github.com/repos/intelligent-environments-lab/CityLearn/contents/data/datasets` at
+import. A re-run of the seven affected modules ten minutes later still skipped, so the
+rate limit was still in force.
+
+The comparison that is actually apples-to-apples is therefore **524 → 546 passed, the
+same 14 skipped, 0 failed: +22 passing, 0 failing, nothing newly skipped.** On a warm
+cache with GitHub reachable the floor is 538 → 560. Nothing was changed to reach either
+number, and no test was edited to accommodate a change: this track adds one file and
+touches no existing test.
+
+## Step 1 — State what the framework guarantees and what it does not
+
+### 1.1 New document `docs/FRAMEWORK_GUARANTEES.md`
+
+**What.** A section for `docs/FRAMEWORK.md`, written to a separate file so it does not
+collide with the abstraction track. It states each constraint as a conditional — *hard
+provided X* — names the calibration X depends on, and gives the measured residual when X
+fails. S0 defines every symbol once; S1–S4 are the four promises; S5 is the list of cases
+where a breach is **not** surfaced; S6 is the honest table of enforced / scored /
+non-existent; S7 reproduces the numbers.
+
+**Why.** Audit C1 says there are two hard constraints, not five, and that the gap between
+the stated position and the code is itself a finding. A framework paper cannot ship a
+sentence like "the district cap is enforced" without the residual next to it. Every
+number in the document is copied from `experiments/diagnostics/guarantee_residuals.py`;
+none is asserted from the design.
+
+**Evidence.** Four measured results carry the document.
+
+* **Battery state-of-charge band — hard, conditional on the plant model.** Exhaustive
+  sweep over the 8 autosized `tx_travis_8b` batteries, 81 actions × 81 in-band start
+  states × 8 buildings = 52 488 cases. With the exact inverse of
+  `citylearn.energy_model.Battery` (`BatteryModel.from_citylearn`, which is what
+  `experiments/controllers.py:495,769` passes): **0 breaches, max residual 0.00000 on
+  both sides**. With the audit's hypothetical uniform `r_b = 0.1` surrogate: **4 829
+  breaches (9.20 %), floor driven to state of charge 0.0, ceiling exceeded by 0.0939**.
+  At half the true rate: 1 223 (2.33 %). The true rates are
+  `[0.267, 0.244, 0.500, 0.516, 0.244, 0.533, 0.178, 0.208]` per step, so 0.1 understates
+  them by 1.8×–5.3×. From a start *outside* the band the full `[0, 1]` sweep shows
+  972/65 448 = 1.49 % breaches with max excess 0.050, all inherited from `x_0`; recovery
+  is 0/8 buildings still outside after one step from `x_0 = 0.00`, and 5/8 after one step
+  and 0/8 after two from `x_0 = 1.00`.
+* **District import cap — soft, with a quantified residual.** 4 houses, `P_cap = 30` kW,
+  378 scored steps, 5 seeds, rule `lp`, base load carrying an unobserved AR(1) thermal
+  component. Margin on: **0.48 % of steps exceeded, 0.48 kWh total, worst single-step
+  residual 0.660 kW = 2.2 % of the cap**, mean margin 1.943 kW. Margin off: **5.82 %,
+  16.31 kWh, worst 2.461 kW**. So the 95th-percentile margin is worth 12× in frequency and
+  34× in energy and is still not a bound. A *persistent* error is absorbed — a +3 kW/house
+  step change, six times the calibrated margin, only lifts the rate to 1.53 % and the
+  worst residual to 1.741 kW, because the forecaster's persistence correction tracks it in
+  one step. An *innovation* change is not: multiplying the innovation spread by 8 gives
+  8.04 % and a worst residual of 22.381 kW = 75 % of the cap, with the margin lagging at
+  5.221 kW. In the saturated regime `P_cap = 16` kW: 7.35 % / 19.51 kWh / 2.822 kW with
+  the margin against 27.25 % / 97.98 kWh / 3.930 kW without.
+* **Electric-vehicle departure state of charge — hard when the joint set is non-empty,
+  reported when not.** 3 vehicles each owing 0.4 SOC of a 50 kWh battery at 2/3/4 steps,
+  each individually reachable. The transition is at `P_cap = 17.5` kW; below it the LP
+  returns `feasible=False` with shortfalls of 5.000 / 20.000 / 40.000 kWh at 15 / 10 /
+  5 kW — exactly the missing energy — and keeps charging at the full cap in every
+  infeasible case. The shortfall is spread, not dumped: three identical vehicles get
+  `shortfall_soc = [0.2, 0.2, 0.2]`, `worst_share = 0.5`. How often the set is empty is a
+  property of the sizing, not of the framework: 13.0 % of steps at `P_cap = 30` kW
+  (0.017 SOC mean total departure shortfall), 57.7 % at 16 kW (0.278 SOC, every vehicle
+  misses), 2 of 286 connected steps at 45 kW (0 of 80 departures missed).
+* **Comfort — soft on CityLearn, deliberately.** Restated with its reason (the learned
+  thermal model moves an indoor temperature by 4–13 °C in one hour, so a hard
+  one-step-reachability barrier would be enforcing an invariant of a model nobody
+  believes) and with the consequence spelled out: every comfort number in the paper is
+  scored, not enforced.
+
+### 1.2 New script `experiments/diagnostics/guarantee_residuals.py`
+
+**What.** The measurement behind every number in 1.1, in seven sections — `soc`, `cap`,
+`deadline`, `report`, `cbf`, `converge`, `tank`. It calls only the public projection
+interface, writes nothing to `results/`, and prints a table.
+
+**Why.** A guarantee quoted from a notebook is a guarantee nobody can re-check. Audit C1's
+claim about which constraints are hard had never been measured; this makes it a command.
+
+**Evidence.** `python experiments/diagnostics/guarantee_residuals.py` reproduces every
+table in `docs/FRAMEWORK_GUARANTEES.md`. The `--quick` flag subsamples `soc` and `cap` for
+a smoke run and is documented as unusable for quoted numbers.
+
+## Step 2 — Test the guarantees adversarially
+
+### 2.1 New suite `tests/test_guarantees.py`, 22 cases, 0 skipped
+
+**What.** One test per attack, asserting *what the framework does* rather than that it
+survived. Nine of them are named `test_documented_gap_*`: they pin a case where a
+constraint is broken and the caller is not told, encoding the current wrong behaviour on
+purpose so that closing the gap fails the test and forces
+`docs/FRAMEWORK_GUARANTEES.md` S5 to be updated in the same commit. Each carries a
+`WHEN FIXED:` line saying what the assertion should become. Every test goes through
+`CBFShield.project`, `FleetShield.project`, `DeadlineStorageBarrier.project`, `schedule`,
+`schedule_executable` or `apply_dead_band`, so the suite survives the abstraction track's
+refactor of the barrier internals.
+
+**Why.** The brief: the framework must degrade predictably and report the breach, and any
+case where it fails silently is the most valuable thing this phase finds.
+
+**Evidence.** `python -m pytest tests/test_guarantees.py -q` → **22 passed, 0 skipped**,
+24.90 s. Whole suite after the addition: **546 passed, 14 skipped, 0 failed**, 312.16 s,
+against 524 passed / 14 skipped on the same command before the first edit — see the
+floor table above for why the skip count moves.
+
+### 2.2 Five silent failures found, and deliberately not fixed here
+
+Listed loudly rather than patched quietly, because each one is a claim the paper would
+otherwise make and could not defend. All five are in `docs/FRAMEWORK_GUARANTEES.md` S5
+with the measurement, and pinned by a `test_documented_gap_*` case.
+
+1. **The six myopic rules never report infeasibility, and a published metric is therefore
+   identically zero.** `FleetShield.project` writes `feasible` and `shortfall_kwh` into
+   `self.last` only on rule `lp`. Measured on two vehicles owing 50 kWh in one step under
+   a 5 kW cap: `lp` reports `feasible=False, shortfall_kwh=40.0`; `independent`, `static`,
+   `proportional`, `edf`, `llf`, `sllf` report neither key. `experiments/ev_coupling.py:135`
+   counts `int(shield.last.get("feasible") is False)`, which with the key absent is `0` at
+   every step, so **`infeasible_hour_rate` is structurally 0.000 for six of the seven
+   rules** — an artefact of a missing dictionary key, not a measurement. It is tabulated
+   only for `lp` today (`experiments/ev_report.py:123`), which is the only reason it has
+   not already produced a wrong number; `experiments/diagnostics/replay_stored_runs.py:19`
+   lists it for any arm.
+2. **`apply_dead_band` rounds an urgent charger up, past the cap, with no report channel.**
+   `allocate` grants `[2.0, 0.0]` kW under a 2.0 kW cap; `apply_dead_band` returns
+   `[4.0, 0.0]` — a 2.000 kW residual, **100 % of the cap** — because an urgent vehicle
+   below `p_min = 4` kW is rounded up to the charger minimum. Through
+   `FleetShield.project` all five coordinating myopic rules end at a predicted import of
+   4.000 kW against a 2.0 kW cap, reporting `binding: True` and no breach flag; `lp`
+   refuses instead (0.000 kW, `feasible: False`). Two mitigations are real and recorded:
+   `predicted_import_kw` carries the post-round number but nothing compares it to
+   `self.cap`, and `ev_coupling` measures `cap_exceed_kwh` from the realised import, so
+   the breach is visible *ex post*. On `lp` the round-up is unreachable in practice —
+   over 400 random fleets `schedule_executable` converged every time, leaving **0**
+   sub-`p_min` allocations for the band to act on. The finding is not the kilowatt: it is
+   that two rules in the same framework resolve the same deadline-versus-cap conflict in
+   **opposite directions**, with no record of the choice.
+3. **With the cap below the inflexible load the shield reports `feasible: True`.** One
+   house, 8 kW inflexible load, 5 kW of battery charging requested, no vehicle.
+   `_shed_storage_charging` sheds everything it can (5.000 kW) and returns; at caps of
+   6 / 3 / 1 kW the predicted import stays at 8.000 kW — residuals of **2.000 / 5.000 /
+   7.000 kW** — while `self.last` says `feasible: True, binding: False`. This is the worst
+   of the five because it is a positive false claim, not an absence: `feasible: True`
+   comes from `schedule`'s `"nothing to charge"` early return and means "the vehicle
+   deadlines are satisfiable", which is vacuously true and not what a caller will read.
+   The same shape appears on `CBFShield._apply_hvac_power_guard`: four buildings at 40 kW
+   base load against a 95 kW derated cap, the guard sheds the heat pump to zero, the
+   import stays at 160 kW (residual **65 kW**), and `CBFShield.project` has no report
+   attribute at all.
+4. **On the `CBFShield` path, deadline infeasibility is never surfaced.**
+   `CBFShield.feasibility_report` computes the whole answer — on three stores owing
+   0.7 SOC of 50 kWh in one step at 6 kW against a 3.8 kW derated cap it returns
+   `feasible=False, required=105.0 kWh, available=3.8 kWh, shortfall=101.2 kWh` plus a
+   per-device miss list — and **no live code path calls it**; the only callers in the
+   repository are `tests/test_deadline.py`. Worse, the live default `coordination =
+   "independent"` (what `experiments/controllers.py:495,769` constructs, since it never
+   passes the argument) applies no district cap to deadline-barrier actions at all:
+   18.00 kW drawn against 3.80 kW. The other two modes enforce the cap by scaling the
+   barrier's *forced floor* from 1.000 down to 0.211 (`proportional`) or
+   `[0.633, 0.000, 0.000]` (`edf`) — the hard deadline constraint loses to the cap, by
+   4.7×, with no record anywhere.
+5. **`reserve_hours` clips an unreachable target to 1.0 and then reports success.**
+   `FleetShield.state` sets `target = min(s*/(1-loss)^idle, 1.0)`. The clip is physically
+   right — a battery cannot exceed full — but the unavoidable departure shortfall it
+   creates is not reported: the LP meets the clipped target and returns `feasible=True`.
+   One vehicle, 5 %/step self-discharge, `s* = 0.90`, 23 steps to departure: at
+   `reserve_hours` 4 / 6 / 12 the needed target is 1.1050 / 1.2243 / 1.6656, the set
+   target is 1.0000, and the vehicle departs at 0.8145 / 0.7351 / 0.5404 — residuals of
+   **0.0855 / 0.1649 / 0.3596 SOC**. This bites only with a non-zero vehicle
+   `loss_coefficient` and `reserve_hours > 0`; the `tx_travis_8b_ev` vehicle batteries
+   carry no explicit `loss_coefficient`, so the residual on the shipped scenario is zero,
+   but the clip is unconditional and nothing warns.
+
+A sixth case is a calibration dependency rather than a shield defect and is recorded as
+such: a hot-water tank model with an optimistic heater efficiency (1.00 against a true
+0.85) under-predicts the house draw, so the shield reports the import as exactly the
+12.0 kW cap while the plant draws 12.706 kW — a **0.706 kW residual, 5.9 % of the cap**.
+A pessimistic model (0.60) is safe and wasteful (10.824 kW). The guarantee rests on
+`TankModel.from_citylearn` / `BatteryModel.from_citylearn` being exact, which is the same
+calibration S1 depends on.
+
+### 2.3 Infeasibility surfacing: every path checked
+
+The audit flagged that the LP admits shortfall as a big-M penalised variable, so the
+deadline constraint is hard only when feasible, and asked whether the infeasibility
+actually reaches the caller on every path.
+
+* `schedule` — reaches the caller. `feasible = (shortfall.sum() == 0)` plus
+  `total_shortfall_kwh`, `shortfall_soc`, `worst_shortfall_share`.
+* `schedule_executable`, dead-band second pass — **reaches the caller, and correctly
+  reports the shortfall of the plan it actually chose, not the first pass's optimistic
+  one.** Measured: one vehicle owing 0.5 SOC in one step under a 2 kW cap, first pass
+  allocates 2.0 kW with a 23.000 kWh shortfall; at `p_min` of 3 / 6 / 9 kW the second pass
+  switches the charger off and re-solves, returning 0.0 kW with **25.000 kWh** and
+  `feasible=False`. At `p_min = 1` kW nothing is in the dead band and the first pass
+  stands. The `try/except RuntimeError` around the "force it on" probe (forcing
+  `x_0 >= p_min` can make the programme genuinely infeasible for HiGHS) falls back to the
+  off branch whose own shortfall is reported, so nothing is lost there either.
+* `apply_dead_band` — **does not reach the caller.** It returns an array and has no report
+  channel; see 2.2 item 2.
+* `FleetShield.project`, rule `lp` — reaches the caller, but the `feasible` and
+  `shortfall_kwh` it publishes are the LP's, computed *before* `apply_dead_band` runs. On
+  `lp` that is harmless because the band is empty by then (0/400 fleets).
+* `FleetShield.project`, the six myopic rules — **does not reach the caller**; see 2.2
+  item 1.
+* `FleetShield.project`, the `independent`-without-guard early return — publishes only
+  `margin_kw`, `binding: False` and `predicted_import_kw`; no `feasible`, and not even the
+  `forced_kw`/`cut_kw` the other paths provide.
+* `CBFShield.project` — **does not reach the caller**; no report channel exists; see 2.2
+  item 4.
+* `fleet_power_bounds` — publishes `feasible` and `total_shortfall_kwh` from the
+  `min_now` solve only; the `max_now` solve's status is discarded.
+
+### 2.4 Nothing was trained, and no grid was run
+
+Per the brief. The `cap` section's rollouts are a closed-form synthetic base-load process
+driven through `FleetShield` in memory; no CityLearn episode is stepped anywhere in this
+track except the one-day environment built to read the eight real battery parameters.
