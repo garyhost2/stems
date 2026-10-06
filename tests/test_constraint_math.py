@@ -81,8 +81,9 @@ def _achieved_import_f32(safe, states, p_nom_kw: float = 10.0) -> float:
 #: Tolerance on the cap, in kW. The shield bisects on, and stores, float32 actions; it
 #: meets the cap exactly in that arithmetic (``_achieved_import_f32`` below asserts it).
 #: Recomputing the same import in float64 with a float64 nominal power disagrees in the
-#: last few bits -- about 4e-6 kW, i.e. 4 microwatts on a 100 kW cap, 4e-8 relative. That
-#: is representation error in the comparison, not slack in the method.
+#: last few bits: the measured residual on the 100 kW case below is 3.81e-08 relative
+#: (3.81e-06 kW, i.e. 3.8 mW). That is representation error in the comparison, not slack
+#: in the method.
 _CAP_TOL_KW = 1e-3
 
 

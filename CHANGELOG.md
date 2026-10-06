@@ -201,10 +201,11 @@ gives the KPIs.
 
 **Numerical note.** The bisection is evaluated on the float32 action it writes back, so
 the shield meets the cap *exactly* in its own arithmetic
-(`_achieved_import_f32(safe, states) <= cap` is asserted). Recomputing the same import in
-float64 with a float64 nominal power disagrees by about 4e-6 kW — 4 microwatts on a
-100 kW cap, 4e-8 relative — so the float64 assertions use a 1e-3 kW tolerance. That is
-representation error in the comparison, not slack in the method.
+(`_achieved_import_f32(safe, states) <= cap` is asserted, and returns 100.0 on the nose).
+Recomputing the same import in float64 with a float64 nominal power disagrees in the last
+few bits: the measured residual is **3.81e-08 relative** (3.81e-06 kW, i.e. 3.8 mW on a
+100 kW cap), so the float64 assertions use a 1e-3 kW tolerance. That is representation
+error in the comparison, not slack in the method.
 
 ### 3.2 Decision: the heat-pump guard stays unwired
 
@@ -222,13 +223,16 @@ was the hazard; that hazard is now gone.
 1. Wiring it would change the dynamics of every stored run, so no existing result could
    be compared against a new one — and the whole point of this track is to leave the
    measured numbers intact unless a bug forces a change.
-2. **It is dimensionally wrong under the control mode the house scenarios use.** The
-   guard multiplies `safe[:, hvac_idx]` by a nominal electrical power to get kW. That is
-   only valid when the environment runs `hvac_control="power"`. The house scenarios run
-   `hvac_control="setpoint"`, where that column is a ±1.5 °C set-point offset and the
-   integral thermostat — not the policy — issues the power command. Multiplying a
-   temperature offset by kW is meaningless. Before this guard is switched on, either the
-   scenario must use `hvac_control="power"`, or the guard must be re-expressed on the
+2. **It is dimensionally wrong under the control mode the experiments actually use.**
+   The guard multiplies `safe[:, hvac_idx]` by a nominal electrical power to get kW,
+   which is only valid when the environment runs `hvac_control="power"`. Two different
+   defaults are involved and they disagree: `STEMSEnvironment`'s own parameter defaults
+   to `"power"`, but `experiments/scenario.py::Scenario` defaults to `"setpoint"`, so
+   every run driven through a `Scenario` — which is every run in `results/` — uses
+   `"setpoint"`. There that column is a ±1.5 °C set-point offset and the integral
+   thermostat, not the policy, issues the power command; multiplying a temperature
+   offset by kW is meaningless. Before this guard is switched on, either the scenario
+   must set `hvac_control="power"`, or the guard must be re-expressed on the
    thermostat's output rather than on the policy action.
 
 Recorded in the method's docstring as well, so the next reader meets it before the code.
@@ -449,8 +453,15 @@ run record would not have said so.
 - the electric-vehicle `charger_*.csv` files beside the schema, hashed with CRLF
   normalised to LF so the line-ending drift of audit E2 cannot move the digest.
 
-For `citylearn_schemas/tx_travis_8b/schema.json` this covers 21 files (7.5 MB, about
-15 ms) and reports `data_missing: []`.
+For `citylearn_schemas/tx_travis_8b/schema.json` this covers the resolved schema plus
+every data file its included buildings reference — 21 files and 7.5 MB as the schema
+stands, about 15 ms — and reports `data_missing: []`. The count is derived, not fixed:
+it moves when a building or a charger is added, so `data_files` is recorded in the run
+record rather than asserted against a literal.
+
+*Correction:* the commit message of `37f211b` says 20 files. The measured value is 21
+(`data_fingerprint(...)["data_files"]`). The commit message is wrong and is left as it
+stands rather than rewriting published history; this entry is the correct record.
 
 **Why a second field rather than a wider one.** More than 400 stored records already
 carry `meta.code.fingerprint`. Changing what that field hashes would make every old
@@ -465,7 +476,7 @@ the building time series, the dependency lock or anything but the CityLearn vers
 string, so two records with the same `fingerprint` could be different experiments
 (audit E1).
 
-**Evidence.** `tests/test_provenance.py`, 11 cases, all passing:
+**Evidence.** `tests/test_provenance.py`, 12 cases, all passing:
 `test_two_different_schemas_get_different_data_fingerprints` builds a 7-building variant
 of the 8-building schema and shows the code fingerprint is identical while the data
 fingerprint differs — the exact failure E1 names;
@@ -588,10 +599,19 @@ sigma_f = 2.8604.
 | **after, `mode="feature"`** | 0.040744 | 0.838355 | **0.797610** | 0.392925 | 0.204998 |
 | after, `mode="mean_pool"` (the ablation) | 1.0 | 1.0 | 0.0 | 1.0 | 0.0 |
 
-The positional spread reproduces the audit's 2.4e-3 exactly. The full old adjacency was
-not quite as degenerate as the positional half alone — the min-max-scaled battery
-capacity did vary — but it still sat at a mean of 0.93 with a standard deviation of 0.06,
-i.e. within 7% of uniform. The feature graph spans 0.04 to 0.84.
+**Read the table like for like.** The audit's 2.394e-03 is the spread of the *old
+positional term alone*, and row 1 reproduces it exactly. It must not be compared against
+row 3, which is a *full adjacency*. The comparison that matters is **full adjacency
+against full adjacency: 0.197404 before, 0.797610 after, a factor of 4.0** — not the
+factor of ~330 that comparing row 1 against row 3 would suggest.
+
+The old full adjacency was therefore less degenerate than the positional half alone,
+because the min-max-scaled battery capacity did vary. It was still nearly uniform: mean
+0.929133 with standard deviation 0.064515, so a typical edge sat within 7% of the mean,
+and the weights spanned 0.802466–0.999870. The feature graph spans 0.040744–0.838355
+with mean 0.392925 and standard deviation 0.204998. The qualitative change is that the
+adjacency now distinguishes buildings instead of being a mean pool with jitter; the
+quantitative change is 4.0x on the like-for-like spread.
 
 ### 6.2 `mode="mean_pool"` ablation arm registered
 
@@ -655,7 +675,8 @@ and it was being recomputed 3·N times per update.
 the adjacency is shared, so the batched form is the same arithmetic.
 `tests/test_encoder_batching.py` keeps the pre-fix loop verbatim as `_loop_reference` and
 asserts agreement to `atol=1e-5, rtol=0`. Measured maximum absolute difference over all
-shapes tested: **2.38e-07**. Ten cases cover N×B of (1,2), (7,3), (33,8) at three seeds,
+shapes tested: **2.38e-07**. Fourteen cases cover N×B of (1,2), (7,3), (33,8) at
+three seeds (nine parametrised cases),
 the N=1 agreement between `forward` and `batch_forward`, gradient flow through the
 batched path, and symmetry plus caching of the normalised adjacency.
 
@@ -677,3 +698,72 @@ At the level that matters — one PPO update — the measured saving is **1.30�
 O(N) Python loop from the inner training path. But a five-seed grid will cost roughly
 3.8 times a two-seed grid, not 2.5, and the budget should be planned on that. If more
 is needed, the transformer is where to look next.
+
+---
+
+## Step 8 — Pre-register the new ARMS names
+
+**What.** Twenty-four arm names are registered in `experiments/controllers.py::ARMS`
+with the fields they need and no builder. `build_controller` raises
+`NotImplementedError` for every one, with a message naming what has to be built and
+where the relevant code or audit finding is.
+
+| group | count | names |
+|---|---|---|
+| comparison controllers | 8 | `sac`, `dmappo`, `mpc`, `maddpg`, `marlisa`, `madcq`, `metaems`, `mappo-cc` |
+| constraint-mechanism cross | 12 | `mech-{none,lagrangian,projection,both}+{uniform,linear,exact}` |
+| hard comfort | 2 | `rl+calibrated+comfort`, `rbc+calibrated+comfort` |
+| degradation | 2 | `rl+calibrated+degr-throughput`, `rl+calibrated+degr-dod` |
+
+**Why a reserved name rather than nothing.** Both downstream tracks would otherwise have
+to decide the naming and the field layout themselves, and a disagreement between them
+would mean restructuring `ARMS` and re-running whatever had already been produced under
+the other convention. Reserving the names fixes the interface now. It also turns
+`--arms mappo-cc` from a `KeyError` that reads like a typo into a `NotImplementedError`
+that says what is missing.
+
+**Why they must not silently fall through.** An arm with no builder that reached some
+other branch would produce a run record indistinguishable from a result. `build_controller`
+refuses before touching the environment.
+
+**New `Arm` fields.** `mechanism` (`"auto"` — the historical coupling — plus `"none"`,
+`"lagrangian"`, `"projection"`, `"both"`), `comfort_barrier` (bool) and `degradation`
+(`"none"`, `"throughput"`, `"throughput+dod"`). `graph_mode` arrived in step 6.
+`plant_model` is a **property**, not a field: it reads `barrier` (`basic` → uniform-rate,
+`linear` → linear, `calibrated` → exact inverse), so the battery-model axis has one
+source of truth rather than two fields that can disagree. `implemented` is likewise
+derived. `learns` now consults `LEARNING_POLICIES` and stays `False` for every
+pre-registered policy, so the grid driver cannot allocate a training budget to an arm
+that cannot use one.
+
+**What the mechanism cross will require of whoever implements it.** `build_controller`
+currently *couples* the two mechanisms: the Lagrangian runs whenever the policy learns,
+and the projection runs whenever `barrier != "none"`. Neither can be switched off
+independently today, which is exactly audit C2's complaint, and decoupling them is the
+work those twelve arms name. The `NotImplementedError` says so.
+
+**A note on the hard-comfort arms, for whoever picks them up.** Hard thermal comfort is
+not unusual in this field — it is standard practice where the thermal model is
+trustworthy; Panagi et al. (2026) embed a calibrated 3R2C grey-box model in a
+network-constrained optimal power flow while explicitly enforcing thermal comfort, DER
+limits and full power-flow physics. The reservation here is specific to this testbed:
+`docs/REPORT_2026-10.md` §2 shows CityLearn's learned temperature model is not physical
+(−0.25 cooling drops a house 4–13 °C in an hour; one house does not respond to cooling at
+all), so a hard band enforced against *that* model is satisfied in simulation and
+meaningless in reality. The barrier belongs behind a flag on CityLearn and the claim
+belongs on an RC model fitted to real data. The `NotImplementedError` carries this.
+
+**Evidence.** `tests/test_preregistered_arms.py`, 80 cases: every name resolves, every
+one reports `implemented is False`, every one raises `NotImplementedError` whose message
+contains the arm name and more than 120 characters of instruction; the cross is complete
+(all twelve `(mechanism, plant_model)` pairs present and distinct); `plant_model` agrees
+with `barrier` on both new and existing arms; `learns` is `False` for all eight
+comparison controllers; and every one of the seventeen pre-existing arms still reports
+`implemented is True` with `mechanism == "auto"`.
+
+`tests/test_experiments.py::test_the_ablation_arms` was scoped to
+`{n: a for n, a in ARMS.items() if a.implemented}`. Recording it under the
+test-editing rule: the alternative was to paste twenty-four names that deliberately do
+not run into an inventory of arms that do, which would make that test a list of things
+that are not there. The pre-registered names are inventoried by the new file instead,
+and the scoped test still fails the moment an *implemented* arm is added or changed.

@@ -14,6 +14,46 @@ LEAD_MARGIN = True
 
 RBC_ACTIONS = ["dhw_storage", "electrical_storage", "cooling_or_heating_device"]
 
+#: Policies whose builder exists today and that take gradient steps.
+LEARNING_POLICIES = frozenset({"rl"})
+
+#: Policies registered as names only. `build_controller` raises NotImplementedError for
+#: each of them, with the reference the implementer needs. Registered now so the
+#: downstream tracks add a builder rather than restructuring ARMS, and so that
+#: `experiments/ablation.py --arms <name>` fails loudly at build time instead of with a
+#: KeyError that reads like a typo. See CHANGELOG.md step 8.
+PRE_REGISTERED_POLICIES: Dict[str, str] = {
+    "sac": "single-agent SAC over the concatenated district state "
+           "(stems.baselines.SingleAgentSAC exists but is unreachable and, per audit A3, "
+           "would not survive review as written)",
+    "dmappo": "independent PPO with a one-step TD advantage, STEMS Table I "
+              "(stems.baselines.DMAPPOAgent: no GAE, optimiser step inside the epoch "
+              "loop against a fixed old_log_prob, no value clipping, no entropy term)",
+    "mpc": "model-predictive control (stems.baselines.MPCAgent holds price constant "
+           "over the horizon, models the battery as soc + 0.1*sum(u) and ignores load, "
+           "PV, comfort and the cap; re-implement, do not resurrect)",
+    "maddpg": "MADDPG with a centralised critic (stems.baselines.MADDPGAgent)",
+    "marlisa": "MARLISA (stems.baselines.MARLISAAgent augments building i's observation "
+               "with buildings 0..i-1's actions at action-selection time but with the "
+               "stored actions at update time; the sequential structure is not "
+               "reproduced in the update)",
+    "madcq": "MADCQ (stems.baselines.MADCQAgent: 11^3 discrete actions, fixed eps=0.1, "
+             "no replay buffer)",
+    "metaems": "MetaEMS (stems.baselines.MetaEMSAgent is SingleAgentSAC with a 50/50 "
+               "parameter average after two half-batch updates; it is not MAML or "
+               "Reptile)",
+    "mappo-cc": "MAPPO with a genuine centralised critic -- the one comparison that "
+                "answers audit D1, since the live path is parameter-shared independent "
+                "PPO on a graph-encoded observation and not a multi-agent algorithm",
+}
+
+#: Constraint mechanisms. "auto" is the historical behaviour; the rest are the clean 2x2
+#: of audit C2 and have no builder yet.
+MECHANISMS = ("auto", "none", "lagrangian", "projection", "both")
+
+#: Battery plant models the projection can invert against, as named by `Arm.barrier`.
+PLANT_MODELS = {"uniform": "basic", "linear": "linear", "exact": "calibrated"}
+
 
 @dataclass(frozen=True)
 class Arm:
@@ -29,10 +69,40 @@ class Arm:
     #: Adjacency the GCN mixes over: "feature" (the default, built from real per-building
     #: device characteristics) or "mean_pool" (uniform, the ablation the GCN must beat).
     graph_mode: str = "feature"
+    #: Which constraint mechanism is active, for the clean 2x2 of audit C2.
+    #: "auto" reproduces the historical behaviour -- the Lagrangian runs whenever the
+    #: policy learns, and the projection runs whenever `barrier != "none"` -- and is what
+    #: every pre-existing arm uses. The explicit values isolate one mechanism at a time:
+    #: "none", "lagrangian", "projection", "both".
+    mechanism: str = "auto"
+    #: Comfort as a hard constraint via a thermal deadline barrier, rather than the
+    #: quadratic reward penalty (audit C1). Not implemented; see CHANGELOG.md step 8.
+    comfort_barrier: bool = False
+    #: Battery and EV degradation as a cost and a constraint (audit C1):
+    #: "none", "throughput", "throughput+dod".
+    degradation: str = "none"
 
     @property
     def learns(self) -> bool:
-        return self.policy == "rl"
+        return self.policy in LEARNING_POLICIES
+
+    @property
+    def plant_model(self) -> Optional[str]:
+        """Which battery model the projection inverts against, derived from `barrier`.
+
+        One source of truth: `barrier` already encodes it, so this is a reading of that
+        field rather than a second field that could disagree with it.
+        """
+        return {"none": None, "basic": "uniform", "linear": "linear",
+                "calibrated": "exact"}[self.barrier]
+
+    @property
+    def implemented(self) -> bool:
+        """False for an arm that is registered as a name but has no builder yet."""
+        return (self.policy not in PRE_REGISTERED_POLICIES
+                and self.mechanism == "auto"
+                and not self.comfort_barrier
+                and self.degradation == "none")
 
 
 ARMS: Dict[str, Arm] = {a.name: a for a in (
@@ -56,7 +126,50 @@ ARMS: Dict[str, Arm] = {a.name: a for a in (
     # place on features alone. This arm is identical to rl+calibrated except that
     # every edge weight is 1, i.e. the encoder mean-pools over buildings.
     Arm("rl+calibrated+meanpool", "rl", "calibrated", graph_mode="mean_pool"),
+
+    # ---------------------------------------------------------------------------
+    # Pre-registered below: names reserved so the baseline and constraint tracks add
+    # a builder rather than restructuring this dict. `build_controller` raises
+    # NotImplementedError for every one of them. See CHANGELOG.md step 8.
+    # ---------------------------------------------------------------------------
+
+    # (a) Eight comparison controllers: the seven STEMS Table I methods, plus MAPPO
+    #     with a genuine centralised critic, which is the one that answers audit D1.
+    *(Arm(name, policy, "calibrated") for name, policy in (
+        ("sac", "sac"),
+        ("dmappo", "dmappo"),
+        ("mpc", "mpc"),
+        ("maddpg", "maddpg"),
+        ("marlisa", "marlisa"),
+        ("madcq", "madcq"),
+        ("metaems", "metaems"),
+        ("mappo-cc", "mappo-cc"),
+    )),
+
+    # (b) The constraint-mechanism 2x2 of audit C2, crossed with the battery plant
+    #     model. `barrier` carries the plant model (basic = uniform rate, linear =
+    #     linear from the exact parameters, calibrated = the exact inverse), and
+    #     `mechanism` says which mechanism is switched on. Twelve arms; the four with
+    #     mechanism="none" differ only in a projection that is switched off, and are
+    #     kept so the cross is complete and the grid driver does not need a special case.
+    *(Arm(f"mech-{mech}+{plant}", "rl", PLANT_MODELS[plant], mechanism=mech)
+      for mech in ("none", "lagrangian", "projection", "both")
+      for plant in ("uniform", "linear", "exact")),
+
+    # (c) Comfort as a hard constraint (audit C1), against the soft reward penalty that
+    #     is the current behaviour. Both a learning and a rule arm, so the barrier can
+    #     be attributed separately from the policy.
+    Arm("rl+calibrated+comfort", "rl", "calibrated", comfort_barrier=True),
+    Arm("rbc+calibrated+comfort", "rbc", "calibrated", comfort_barrier=True),
+
+    # (d) Degradation as a cost and a constraint (audit C1), which the EV and V2G story
+    #     needs and which is currently a KPI only.
+    Arm("rl+calibrated+degr-throughput", "rl", "calibrated", degradation="throughput"),
+    Arm("rl+calibrated+degr-dod", "rl", "calibrated", degradation="throughput+dod"),
 )}
+
+#: Arms registered as names with no builder yet. Computed, not hand-maintained.
+PRE_REGISTERED_ARMS = tuple(n for n, a in ARMS.items() if not a.implemented)
 
 
 class RuleColumns:
@@ -213,10 +326,51 @@ def safety_layer(barrier: str, env):
     raise ValueError(f"unknown barrier {barrier!r}")
 
 
+def _refuse_unimplemented(arm: Arm) -> None:
+    """Fail loudly and usefully for an arm that is a reserved name, not a controller.
+
+    A pre-registered arm must not quietly fall through to some other branch and produce
+    a run record that looks like a result. Each message names what has to be built and
+    where the relevant code or audit finding is.
+    """
+    if arm.policy in PRE_REGISTERED_POLICIES:
+        raise NotImplementedError(
+            f"arm {arm.name!r} is pre-registered, not implemented. Its policy "
+            f"{arm.policy!r} needs a builder: {PRE_REGISTERED_POLICIES[arm.policy]}. "
+            "Add the branch to experiments/controllers.py::build_controller; the arm "
+            "name and its fields are already fixed so nothing downstream has to change.")
+    if arm.mechanism != "auto":
+        raise NotImplementedError(
+            f"arm {arm.name!r} is pre-registered, not implemented. It asks for "
+            f"mechanism={arm.mechanism!r} with the {arm.plant_model!r} battery model, "
+            "which is the constraint-mechanism 2x2 of audit C2. build_controller "
+            "currently couples the two: the Lagrangian runs whenever the policy learns "
+            "and the projection runs whenever barrier != 'none', so neither can be "
+            "switched off independently. Decoupling them is the work this arm names.")
+    if arm.comfort_barrier:
+        raise NotImplementedError(
+            f"arm {arm.name!r} is pre-registered, not implemented. Hard comfort (audit "
+            "C1) needs a thermal deadline barrier built on "
+            "stems.deadline.DeadlineStorageBarrier, with the soft reward penalty kept "
+            "as the comparison arm. Note that enforcing a hard band against CityLearn's "
+            "learned temperature model gives a constraint satisfied in simulation and "
+            "meaningless in reality (REPORT section 2); the claim belongs on an RC model "
+            "fitted to real data.")
+    if arm.degradation != "none":
+        raise NotImplementedError(
+            f"arm {arm.name!r} is pre-registered, not implemented. It asks for "
+            f"degradation={arm.degradation!r} (audit C1): throughput and depth-of-"
+            "discharge ageing wired as both a reward term and a constraint. Today "
+            "degradation is counted as the KPI battery_equivalent_full_cycles and "
+            "nothing acts on it.")
+
+
 def build_controller(arm: Arm, env, config):
     from stems.agent import STEMSAgent
     from stems.cbf import CBFShield
     from stems.graph import BuildingGraph
+
+    _refuse_unimplemented(arm)
 
     B = env.num_buildings
     safety, battery_model = safety_layer(arm.barrier, env)

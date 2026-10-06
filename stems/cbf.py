@@ -217,11 +217,14 @@ class CBFShield:
         (``_apply_power_guard``); this is now the same bisection.
 
         Dimensional caveat: ``safe[:, hvac_idx]`` is a power fraction only when the
-        environment runs with ``hvac_control="power"``. Under ``hvac_control="setpoint"``
-        -- the default for the house scenarios -- that column is a +/-1.5 degC set-point
-        offset and multiplying it by ``p_nom`` is meaningless. The guard is reached only
-        when a ``cop_model`` is passed, which ``experiments/controllers.py`` does not do;
-        see CHANGELOG.md for that decision.
+        environment runs with ``hvac_control="power"``, which is ``STEMSEnvironment``'s
+        own parameter default. Under ``hvac_control="setpoint"`` -- which is what
+        ``experiments/scenario.py::Scenario`` defaults to, and therefore what every run
+        driven through a Scenario uses -- that column is a +/-1.5 degC set-point offset,
+        the integral thermostat issues the power command, and multiplying the offset by
+        ``p_nom`` is meaningless. The guard is reached only when a ``cop_model`` is
+        passed, which ``experiments/controllers.py`` does not do; see CHANGELOG.md for
+        that decision.
         """
         if self.cop_model is None or self.hvac_idx < 0:
             return safe

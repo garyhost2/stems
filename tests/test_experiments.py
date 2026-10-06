@@ -143,7 +143,12 @@ def test_environment_refuses_to_shorten_the_simulation():
 
 
 def test_the_ablation_arms():
-    assert {n: (a.policy, a.barrier) for n, a in ARMS.items()} == {
+    # Scoped to the arms that have a builder. The 24 names pre-registered for the
+    # baseline and constraint tracks (step 8) have no builder yet and are inventoried
+    # by tests/test_preregistered_arms.py instead; mixing them in here would make this
+    # test a list of things that do not run.
+    implemented = {n: a for n, a in ARMS.items() if a.implemented}
+    assert {n: (a.policy, a.barrier) for n, a in implemented.items()} == {
         "idle": ("idle", "none"),
         "idle+calibrated": ("idle", "calibrated"),
         "rbc": ("rbc", "none"),
@@ -162,7 +167,7 @@ def test_the_ablation_arms():
         "rl-hp": ("rl", "none"),
         "rl+calibrated+meanpool": ("rl", "calibrated"),
     }
-    assert [n for n, a in ARMS.items() if a.learns] == [
+    assert [n for n, a in implemented.items() if a.learns] == [
         "rl", "rl+basic", "rl+linear", "rl+calibrated", "rl-res+calibrated", "rl+calibrated+pen",
         "rl+calibrated+own", "rl+calibrated+floor", "rl-hp", "rl+calibrated+meanpool"]
     assert ARMS["rl-res+calibrated"].residual and ARMS["rl+calibrated+pen"].penalty > 0
