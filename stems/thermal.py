@@ -6,13 +6,12 @@ import numpy as np
 
 from stems.deadline import DeadlineRequirement, DeadlineStorageBarrier
 from stems.environment import T_OUT_PRED_LEAD_H
+from stems.observations import obs_index, obs_indices
 
-IDX_DAY_TYPE = 0
-IDX_HOUR = 1
-IDX_T_OUT = 2
-IDX_T_OUT_PRED = 3
-IDX_SOC_DHW = 18
-IDX_DHW_DEMAND = 25
+IDX_DAY_TYPE, IDX_HOUR, IDX_T_OUT = obs_indices(
+    "day_type", "hour", "outdoor_dry_bulb_temperature")
+IDX_T_OUT_PRED = obs_index("outdoor_dry_bulb_temperature_predicted_1")
+IDX_SOC_DHW, IDX_DHW_DEMAND = obs_indices("dhw_storage_soc", "dhw_demand")
 
 _MIN_COP = 0.5
 _MAX_COP = 20.0

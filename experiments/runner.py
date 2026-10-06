@@ -13,7 +13,10 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parents[1]
 
-_IDX_SOC_DHW, _IDX_SOC, _IDX_NET = 18, 19, 20
+from stems.observations import obs_indices
+
+_IDX_SOC_DHW, _IDX_SOC, _IDX_NET = obs_indices(
+    "dhw_storage_soc", "electrical_storage_soc", "net_electricity_consumption")
 
 
 def _jsonable(x: Any) -> Any:

@@ -6,12 +6,19 @@ from typing import Any, Dict, List, Optional, Sequence
 import numpy as np
 
 from stems.battery import BatteryModel, TankModel
+from stems.observations import obs_index
 
 __all__ = ["EVFleetModel", "FleetState", "BaseLoadForecaster", "FleetShield", "HouseStorage",
            "schedule",
            "schedule_executable", "allocate", "laxity", "apply_dead_band", "fleet_power_bounds",
            "MYOPIC_RULES",
            "RULES"]
+
+_IDX_LOAD = obs_index("non_shiftable_load")
+_IDX_SOLAR = obs_index("solar_generation")
+_IDX_SOC_DHW = obs_index("dhw_storage_soc")
+_IDX_DHW_DEMAND = obs_index("dhw_demand")
+_IDX_NET = obs_index("net_electricity_consumption")
 
 MYOPIC_RULES = ("independent", "static", "proportional", "edf", "llf", "sllf")
 RULES = MYOPIC_RULES + ("lp",)
@@ -387,7 +394,7 @@ def apply_dead_band(model: EVFleetModel, state: FleetState, kw: np.ndarray) -> n
 class BaseLoadForecaster:
     def __init__(self, num_buildings: int, replay: Optional[np.ndarray] = None,
                  quantile: float = 0.95, window: int = 168,
-                 load_index: int = 16, solar_index: int = 17,
+                 load_index: int = _IDX_LOAD, solar_index: int = _IDX_SOLAR,
                  daily_pattern_days: int = 0) -> None:
         self.B = int(num_buildings)
         self.daily_pattern_days = int(daily_pattern_days)
@@ -488,8 +495,8 @@ class HouseStorage:
     soc_hi: Any
     tank: Optional[TankModel] = None
     tank_action: int = 0
-    tank_soc: int = 18
-    tank_demand: int = 25
+    tank_soc: int = _IDX_SOC_DHW
+    tank_demand: int = _IDX_DHW_DEMAND
 
     def read(self, obs_list: Sequence[np.ndarray]) -> Dict[str, np.ndarray]:
         col = lambda i: np.array([float(o[i]) for o in obs_list], dtype=np.float64)
@@ -626,7 +633,7 @@ class FleetShield:
         return actions, kw
 
     def observe(self, next_obs_list: Sequence[np.ndarray], ev_draw_kwh: np.ndarray,
-                net_index: int = 20) -> None:
+                net_index: int = _IDX_NET) -> None:
         net = np.array([float(o[net_index]) for o in next_obs_list], dtype=np.float64)
         self.forecaster.observe(net - np.asarray(ev_draw_kwh, dtype=np.float64))
 

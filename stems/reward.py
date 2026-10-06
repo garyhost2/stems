@@ -5,14 +5,12 @@ from typing import List, Optional
 import numpy as np
 
 from stems.config import RewardConfig
+from stems.observations import obs_indices
 
-_IDX_T_IN = 15
-_IDX_LOAD = 16
-_IDX_SOLAR = 17
-_IDX_NET = 20
-_IDX_PRICE = 21
-_IDX_OCCUPANT = 26
-_IDX_T_SET = 27
+_IDX_T_IN, _IDX_LOAD, _IDX_SOLAR, _IDX_NET, _IDX_PRICE, _IDX_OCCUPANT, _IDX_T_SET = \
+    obs_indices("indoor_dry_bulb_temperature", "non_shiftable_load", "solar_generation",
+                "net_electricity_consumption", "electricity_pricing", "occupant_count",
+                "indoor_dry_bulb_temperature_cooling_set_point")
 
 
 class STEMSReward:

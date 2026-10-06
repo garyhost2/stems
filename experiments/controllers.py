@@ -238,13 +238,13 @@ def build_controller(arm: Arm, env, config):
     def fleet(barrier):
         if not ev_indices or arm.barrier == "none":
             return None
-        from stems.cbf import _IDX_SOC_ELEC
         from stems.fleet import BaseLoadForecaster, FleetShield, HouseStorage
+        from stems.observations import obs_index
 
         lo, hi = barrier.enforced_soc_bounds()
         names = list(env.action_names)
         house = HouseStorage(env.battery_model(), env.electrical_storage_action_index,
-                             _IDX_SOC_ELEC, lo, hi,
+                             obs_index("electrical_storage_soc"), lo, hi,
                              tank=env.dhw_tank_model() if "dhw_storage" in names else None,
                              tank_action=names.index("dhw_storage") if "dhw_storage" in names else 0)
         barrier.grid_guard = False

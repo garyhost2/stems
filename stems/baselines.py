@@ -11,16 +11,14 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 from stems.environment import thermostat_step
+from stems.observations import obs_indices
 
-_IDX_HOUR = 1
-_IDX_PRICE = 21
-_IDX_SOC_ELEC = 19
-_IDX_T_IN = 15
-_IDX_LOAD = 16
-_IDX_SOLAR = 17
-_IDX_T_COOL = 27
-_IDX_T_HEAT = 28
-_IDX_NET = 20
+_IDX_HOUR, _IDX_PRICE, _IDX_SOC_ELEC, _IDX_T_IN, _IDX_LOAD, _IDX_SOLAR = obs_indices(
+    "hour", "electricity_pricing", "electrical_storage_soc",
+    "indoor_dry_bulb_temperature", "non_shiftable_load", "solar_generation")
+_IDX_T_COOL, _IDX_T_HEAT, _IDX_NET = obs_indices(
+    "indoor_dry_bulb_temperature_cooling_set_point",
+    "indoor_dry_bulb_temperature_heating_set_point", "net_electricity_consumption")
 
 
 class RuleBasedAgent:

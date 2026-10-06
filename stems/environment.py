@@ -14,77 +14,34 @@ except BaseException as exc:
     _CITYLEARN_IMPORT_ERROR = exc
 
 
-OBS_NAMES: List[str] = [
-    "day_type",
-    "hour",
-    "outdoor_dry_bulb_temperature",
-    "outdoor_dry_bulb_temperature_predicted_1",
-    "outdoor_dry_bulb_temperature_predicted_2",
-    "outdoor_dry_bulb_temperature_predicted_3",
-    "diffuse_solar_irradiance",
-    "diffuse_solar_irradiance_predicted_1",
-    "diffuse_solar_irradiance_predicted_2",
-    "diffuse_solar_irradiance_predicted_3",
-    "direct_solar_irradiance",
-    "direct_solar_irradiance_predicted_1",
-    "direct_solar_irradiance_predicted_2",
-    "direct_solar_irradiance_predicted_3",
-    "carbon_intensity",
-    "indoor_dry_bulb_temperature",
-    "non_shiftable_load",
-    "solar_generation",
-    "dhw_storage_soc",
-    "electrical_storage_soc",
-    "net_electricity_consumption",
-    "electricity_pricing",
-    "electricity_pricing_predicted_1",
-    "electricity_pricing_predicted_2",
-    "cooling_demand",
-    "dhw_demand",
-    "occupant_count",
-    "indoor_dry_bulb_temperature_cooling_set_point",
-]
+#: Observation names, indices and electric-vehicle slot helpers live in
+#: ``stems.observations`` so the environment, the schema builders and every consumer
+#: that reads an observation by position share one definition (audit B8, B9). They are
+#: re-exported here because that is where the rest of the repository imports them from.
+from stems.observations import (  # noqa: F401  (re-exported)
+    ACTION_DIM,
+    CANONICAL_OBS_NAMES,
+    EV_ACTION_PREFIX,
+    EV_SLOT_FIELDS,
+    HEATPUMP_OBS_NAMES,
+    OBS_DIM,
+    OBS_NAMES,
+    T_OUT_PRED_LEAD_H,
+    ev_native_obs_names,
+    ev_slot_action_name,
+    ev_slot_obs_names,
+    index_in,
+    obs_index,
+    obs_indices,
+    schema_observation_names,
+)
 
-T_OUT_PRED_LEAD_H = (6.0, 12.0, 24.0)
-
-HEATPUMP_OBS_NAMES: List[str] = [
-    "indoor_dry_bulb_temperature_heating_set_point",
-    "heating_electricity_consumption",
-]
-
-OBS_DIM = len(OBS_NAMES)
-ACTION_DIM = 3
-
-
-EV_SLOT_FIELDS: List[str] = [
-    "connected_state",
-    "departure_time",
-    "required_soc_departure",
-    "soc",
-    "battery_capacity",
-]
-
-
-def ev_slot_obs_names(slot: int) -> List[str]:
-    return [f"ev{slot}_{f}" for f in EV_SLOT_FIELDS]
-
-
-def ev_native_obs_names(charger_id: str) -> Dict[str, str]:
-    base = f"connected_electric_vehicle_at_charger_{charger_id}"
-    return {
-        "connected_state": f"electric_vehicle_charger_{charger_id}_connected_state",
-        "departure_time": f"{base}_departure_time",
-        "required_soc_departure": f"{base}_required_soc_departure",
-        "soc": f"{base}_soc",
-        "battery_capacity": f"{base}_battery_capacity",
-    }
-
-
-EV_ACTION_PREFIX = "electric_vehicle_storage"
-
-
-def ev_slot_action_name(slot: int) -> str:
-    return f"{EV_ACTION_PREFIX}_{slot}"
+_IDX_T_OUT = obs_index("outdoor_dry_bulb_temperature")
+_IDX_HOUR = obs_index("hour")
+_IDX_NET = obs_index("net_electricity_consumption")
+_IDX_PRICE = obs_index("electricity_pricing")
+_IDX_T_OUT_PRED = obs_indices(*[f"outdoor_dry_bulb_temperature_predicted_{k}"
+                                for k in (1, 2, 3)])
 
 
 ACTION_GROUPS: Dict[str, List[str]] = {
@@ -270,7 +227,7 @@ class _MockCityLearnEnv:
     def step(self, actions: List[np.ndarray]):
         self._timestep += 1
         obs = [b.step(a, self._heat_pump) for b, a in zip(self._buildings, actions)]
-        rewards = [float(-o[20] * o[21]) for o in obs]
+        rewards = [float(-o[_IDX_NET] * o[_IDX_PRICE]) for o in obs]
         done = self._timestep >= self.EPISODE_LEN
         return obs, rewards, done, False, {}
 
@@ -724,7 +681,7 @@ class STEMSEnvironment:
         for slot in range(self._ev_slots):
             names = ev_slot_obs_names(slot)
             layout = {f: index[n] for f, n in zip(EV_SLOT_FIELDS, names)}
-            layout["hour"] = index.get("hour", 1)
+            layout["hour"] = index.get("hour", _IDX_HOUR)
             layout["slot"] = slot
             layouts.append(layout)
         return layouts
@@ -814,6 +771,17 @@ class STEMSEnvironment:
     @property
     def obs_names(self) -> List[str]:
         return list(self._selected_obs_names)
+
+    def index_of(self, name: str) -> int:
+        """Position of observation ``name`` in the vector this environment emits.
+
+        The single accessor every consumer should use instead of a literal index
+        (audit B9). It covers the electric-vehicle slot fields too, whose position
+        depends on ``heat_pump`` and on how many chargers the schema exposes, and so
+        cannot be resolved by ``stems.observations.obs_index``. Raises ``KeyError``
+        for a name this environment does not carry.
+        """
+        return index_in(self._selected_obs_names, name)
 
     @property
     def electrical_storage_action_index(self) -> int:
@@ -945,11 +913,11 @@ class STEMSEnvironment:
                 result.append(obs)
         if self._temp_offset != 0.0:
             for obs in result:
-                for idx in (2, 3, 4, 5):
+                for idx in (_IDX_T_OUT,) + _IDX_T_OUT_PRED:
                     obs[idx] += self._temp_offset
         if getattr(self, "_temp_gradient", 0.0) != 0.0:
             for obs in result:
-                for idx, lead in zip((3, 4, 5), T_OUT_PRED_LEAD_H):
+                for idx, lead in zip(_IDX_T_OUT_PRED, T_OUT_PRED_LEAD_H):
                     obs[idx] += self._temp_gradient * lead
         return result
 

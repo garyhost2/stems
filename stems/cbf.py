@@ -10,11 +10,12 @@ from stems.battery import BatteryModel
 from stems.config import CBFConfig, SafetyConfig
 from stems.deadline import (DeadlineStorageBarrier, coupled_feasibility,
                             prioritise)
+from stems.observations import obs_indices
 from stems.thermal import CoPModel, DHWReadinessBarrier
 
-_IDX_T_OUT = 2
-_IDX_SOC_ELEC = 19
-_IDX_NET = 20
+_IDX_T_OUT, _IDX_SOC_ELEC, _IDX_NET = obs_indices(
+    "outdoor_dry_bulb_temperature", "electrical_storage_soc",
+    "net_electricity_consumption")
 
 
 class CBFShield:

@@ -11,7 +11,10 @@ from experiments.controllers import ARMS, build_controller
 from experiments.runner import make_config
 from experiments.scenario import Scenario
 from stems.environment import STEMSEnvironment
+from stems.observations import obs_indices
 from stems.utils import HistoryBuffer, set_seed
+
+_IDX_HOUR, _IDX_PRICE = obs_indices("hour", "electricity_pricing")
 
 EV = "citylearn_schemas/tx_travis_8b_ev/schema.json"
 arm_name, season, seed = sys.argv[1], sys.argv[2], int(sys.argv[3])
@@ -43,14 +46,14 @@ def rollout(environment, record):
     hist.update(obs)
     done, rows, deps = False, [], []
     while not done:
-        hour = int(round(float(obs[0][1])))
+        hour = int(round(float(obs[0][_IDX_HOUR])))
         a = ctrl.select_action(obs, hist.get(), explore=False)
         nominal = getattr(ctrl, "_last_nominal_actions", getattr(ctrl, "_last_raw_actions", None))
         col = lambda key: np.array([float(o[layout[key]]) for o in obs])
         conn = (col("connected_state") > 0.5) & fs.model.has_ev
         asked = np.where(conn, np.clip(nominal[:, e], 0.0, 1.0), 0.0)
         asked_kw = fs.model.draw_kw(np.where(conn, col("soc"), 0.0), asked)
-        price = float(obs[0][21])
+        price = float(obs[0][_IDX_PRICE])
         nxt, _, term, trunc, _ = environment.step(a)
         ctrl.observe(nxt, environment.ev_draw_kwh)
         rows.append((hour, float(asked_kw.sum()), float(environment.ev_draw_kwh.sum()), int(conn.sum()),

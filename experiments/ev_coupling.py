@@ -19,8 +19,11 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+from stems.observations import obs_indices
+
 EV_SCHEMA = "citylearn_schemas/tx_travis_8b_ev/schema.json"
-_IDX_HOUR, _IDX_NET, _IDX_PRICE = 1, 20, 21
+_IDX_HOUR, _IDX_NET, _IDX_PRICE = obs_indices(
+    "hour", "net_electricity_consumption", "electricity_pricing")
 PEAK_HOURS = range(17, 22)
 PREP_HOURS = range(13, 17)
 ALL_RULES = ("noguard", "independent", "static", "proportional", "edf", "llf", "sllf", "lp")

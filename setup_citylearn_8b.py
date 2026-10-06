@@ -5,39 +5,23 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-STEMS_OBSERVATIONS: List[str] = [
-    "day_type",
-    "hour",
-    "outdoor_dry_bulb_temperature",
-    "outdoor_dry_bulb_temperature_predicted_1",
-    "outdoor_dry_bulb_temperature_predicted_2",
-    "outdoor_dry_bulb_temperature_predicted_3",
-    "diffuse_solar_irradiance",
-    "diffuse_solar_irradiance_predicted_1",
-    "diffuse_solar_irradiance_predicted_2",
-    "diffuse_solar_irradiance_predicted_3",
-    "direct_solar_irradiance",
-    "direct_solar_irradiance_predicted_1",
-    "direct_solar_irradiance_predicted_2",
-    "direct_solar_irradiance_predicted_3",
-    "carbon_intensity",
-    "indoor_dry_bulb_temperature",
-    "non_shiftable_load",
-    "solar_generation",
-    "electrical_storage_soc",
-    "net_electricity_consumption",
-    "electricity_pricing",
-    "electricity_pricing_predicted_1",
-    "electricity_pricing_predicted_2",
-    "cooling_demand",
-    "dhw_demand",
-    "occupant_count",
-    "indoor_dry_bulb_temperature_cooling_set_point",
-]
+from stems.observations import schema_observation_names
+
+#: Observations this script marks ``active`` in the generated schema. Taken from
+#: ``stems.observations`` so the schema and ``stems/environment.py`` cannot disagree
+#: (audit B8). The hand-maintained copy this replaces omitted ``dhw_storage_soc``,
+#: ``indoor_dry_bulb_temperature_heating_set_point`` and
+#: ``heating_electricity_consumption``, all three of which the environment requires;
+#: the generated schema worked only because the upstream Travis schema happens to have
+#: them active already.
+STEMS_OBSERVATIONS: List[str] = schema_observation_names()
 
 STEPPABLE_TRAVIS_3_ACTION: List[str] = [
     "resstock-amy2018-2021-release-1-134795",

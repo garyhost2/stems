@@ -20,3 +20,6 @@ citylearn_schemas/_subsets/
 
 # CityLearn source checkout created by setup_citylearn.sh
 third_party/
+
+# Local copy of the CityLearn dataset cache (142 MB, downloaded, never version this)
+.citylearn_cache/

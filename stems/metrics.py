@@ -5,17 +5,14 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from stems.config import CBFConfig
+from stems.observations import obs_indices
 
-_IDX_PRICE = 21
-_IDX_CARBON = 14
-_IDX_T_IN = 15
-_IDX_T_SET = 27
-_IDX_OCCUPANT = 26
-_IDX_NET = 20
-_IDX_SOC_ELEC = 19
-_IDX_SOC_DHW = 18
-_IDX_DHW_DEMAND = 25
-_IDX_SOLAR = 17
+_IDX_PRICE, _IDX_CARBON, _IDX_T_IN, _IDX_T_SET, _IDX_OCCUPANT = obs_indices(
+    "electricity_pricing", "carbon_intensity", "indoor_dry_bulb_temperature",
+    "indoor_dry_bulb_temperature_cooling_set_point", "occupant_count")
+_IDX_NET, _IDX_SOC_ELEC, _IDX_SOC_DHW, _IDX_DHW_DEMAND, _IDX_SOLAR = obs_indices(
+    "net_electricity_consumption", "electrical_storage_soc", "dhw_storage_soc",
+    "dhw_demand", "solar_generation")
 
 _HVAC_ON = 0.05
 _INTERVENTION_TOL = 1e-3

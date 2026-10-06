@@ -18,7 +18,9 @@ arm_name, season, days, cap = sys.argv[1], sys.argv[2], int(sys.argv[3]), float(
 pattern = int(sys.argv[5])
 nohouse = len(sys.argv) > 6 and sys.argv[6] == "nohouse"
 sc = Scenario(schema=EV, season=season, days=days, grid_cap_kw=cap)
-NET, HOUR = 20, 1
+from stems.observations import obs_indices
+
+NET, HOUR = obs_indices("net_electricity_consumption", "hour")
 
 
 def rollout(ctrl, phase, record):
