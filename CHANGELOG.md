@@ -134,3 +134,145 @@ under `citylearn_schemas/` was touched.
 `stems/` and `experiments/` and fails on any line matching `_IDX_NAME = <integer>`.
 
 **Evidence.** Passes with zero offenders after the rewrite; it failed on 23 lines before it.
+
+---
+
+## Environment and baseline (context for everything below)
+
+The CityLearn dataset cache now lives inside the repository at `.citylearn_cache/`
+(142 MB, gitignored — added to `.gitignore` in the step 2 commit). Runs need
+`XDG_CACHE_HOME=/home/yassine/Documents/Yassin-code/stems/.citylearn_cache`.
+
+**True test baseline before the correctness fixes: 284 passed, 0 failed, 0 skipped,
+109 s.** That is the floor; no change below may reduce it. Two earlier counts quoted
+during this work (171 passed / 35 skipped / 6 errors, and 186 passed / 19 failed) were
+artefacts of a half-installed environment and say nothing about the repository.
+
+The README states the suite takes about ten minutes; it takes 109 s on this machine.
+Not corrected here — `docs/REPORT_2026-10.md` and `README.md` are out of scope for this
+track — but it should be corrected when someone next edits the README.
+
+Regenerating the EV schema from seed 17 rewrote the six tracked charger CSVs, and all six
+are byte-identical to the committed copies after stripping carriage returns: md5
+`1c6a1eb6467d7ca44568fb9a644db9e7`, `c85806ffbab7c557f16221367baaaffe`,
+`fdb89985e2b219a1a30fb1214a4fe4aa`, `b80ffcd8741401d00e776e1d54a926ee`,
+`a93576a771f383ce1dba3e8e1976d02b`, `1128d46876d1c7081e40deecc0de0b2a`. The synthetic EV
+schedules are therefore genuinely deterministic, which is worth stating in the paper's
+reproducibility section, and the apparent git modification was only the CRLF drift that
+entry 1.2 fixed.
+
+---
+
+## Step 3 — Fix the shield and Lagrangian math (audit B1, B3)
+
+### 3.1 `CBFShield._apply_hvac_power_guard` now bisects on the achieved import
+
+**What.** The district stage of the heat-pump guard was
+
+```python
+total = sum(max(net + |a_hvac| * p_nom, 0))
+if total > g_cap: safe[:, hvac] *= g_cap / total
+```
+
+It is now the same bisection the battery grid guard uses: find the largest common shed
+factor `s` in [0, 1] such that `I(s) = sum_b max(e_b + s*|a_b|*p_b, 0)` meets the cap.
+
+**Why.** Scaling the action by `cap/total` does not bring the import to the cap, because
+`total` contains the uncontrollable `net` term and the rescale cannot touch it
+(audit B1). This is the same arithmetic error that `docs/REPORT_2026-10.md` §6.7 records
+as found and corrected in the battery grid guard; the heat-pump guard still had the
+original form.
+
+**Evidence.** `tests/test_constraint_math.py::test_hvac_guard_brings_the_district_import_to_the_cap`.
+Four buildings at `e_b = 20 kW` (80 kW uncontrollable) each requesting full heat-pump
+power `p_b = 10 kW` (40 kW controllable), against `P_grid_max = 100 kW`:
+
+| | shed factor | achieved import | over cap |
+|---|---|---|---|
+| before (`cap/total`) | 0.8333 | **113.33 kW** | **+13.33 kW (+13.3%)** |
+| after (bisection) | 0.5000 | 100.00 kW | 0 |
+
+Three further cases are pinned: the fixed load alone above the cap (the guard sheds the
+whole controllable draw rather than leaving a positive heat-pump request on top of an
+already-infeasible import); a feasible request passing through untouched; and one
+building exporting 30 kW while three import 30 kW, where the signed sum is 60 kW but the
+import is 90 kW — the guard enforces the positive-part definition, the same one step 4
+gives the KPIs.
+
+**Numerical note.** The bisection is evaluated on the float32 action it writes back, so
+the shield meets the cap *exactly* in its own arithmetic
+(`_achieved_import_f32(safe, states) <= cap` is asserted). Recomputing the same import in
+float64 with a float64 nominal power disagrees by about 4e-6 kW — 4 microwatts on a
+100 kW cap, 4e-8 relative — so the float64 assertions use a 1e-3 kW tolerance. That is
+representation error in the comparison, not slack in the method.
+
+### 3.2 Decision: the heat-pump guard stays unwired
+
+**Decision.** The guard is fixed but **not** wired up: `experiments/controllers.py`
+still does not pass `cop_model`, so `CBFShield._apply_hvac_power_guard` returns at its
+first line in every experiment, exactly as before.
+
+**Why not delete it.** The per-building stage — derating the cap by the
+coefficient-of-performance shortfall at the current outdoor temperature — is a real
+constraint that the heat-pump papers will need, and the module is the natural home for
+it. Leaving arithmetically wrong code in place one keyword argument away from being used
+was the hazard; that hazard is now gone.
+
+**Why not wire it.** Two reasons, the second decisive.
+1. Wiring it would change the dynamics of every stored run, so no existing result could
+   be compared against a new one — and the whole point of this track is to leave the
+   measured numbers intact unless a bug forces a change.
+2. **It is dimensionally wrong under the control mode the house scenarios use.** The
+   guard multiplies `safe[:, hvac_idx]` by a nominal electrical power to get kW. That is
+   only valid when the environment runs `hvac_control="power"`. The house scenarios run
+   `hvac_control="setpoint"`, where that column is a ±1.5 °C set-point offset and the
+   integral thermostat — not the policy — issues the power command. Multiplying a
+   temperature offset by kW is meaningless. Before this guard is switched on, either the
+   scenario must use `hvac_control="power"`, or the guard must be re-expressed on the
+   thermostat's output rather than on the policy action.
+
+Recorded in the method's docstring as well, so the next reader meets it before the code.
+
+### 3.3 Cost advantages are standardised like reward advantages
+
+**What.** The combination of reward and cost advantages moved out of `STEMSAgent.update`
+into a testable static method `STEMSAgent.effective_advantage(adv, cadv, lam_k)`, and the
+cost advantage is now standardised over the time axis:
+
+```
+cadv = (cadv - cadv.mean(0)) / (cadv.std(0) + 1e-8)      # was: cadv - cadv.mean(0)
+A_eff = (A - sum_k lambda_k * A^c_k) / (1 + sum_k lambda_k)
+```
+
+**Why.** `adv` was standardised to unit variance and `cadv` was mean-centred only, so the
+two terms were on incompatible scales (audit B3). With 0/1 indicator costs and γ = 0.99
+the cost advantage has a spread of order 10 while `adv` has unit variance, so λ's
+effective weight depended on the raw spread of the costs rather than on the constraint. A
+λ tuned on one scenario did not transfer to another, and the per-episode λ traces logged
+by different runs were not comparable.
+
+**Evidence.** `test_effective_advantage_is_invariant_to_the_cost_scale` — rescaling the
+costs by 0.01x, 10x and 1000x leaves `A_eff` unchanged to 1e-4.
+`test_effective_advantage_was_not_invariant_before_the_fix` reproduces the old
+mean-centring and shows it fails that same invariance, so the first test is testing
+something. `test_cost_advantages_reach_unit_variance` recovers the standardised cost
+advantage from `A_eff` at λ = (1, 0, 0) and checks its mean (<1e-5) and standard
+deviation (1 ± 1e-3). `test_effective_advantage_reduces_to_the_reward_advantage_at_zero_lambda`
+pins the λ = 0 limit.
+
+### 3.4 Partial dispute: the λ *trajectory* was already reward-scale invariant
+
+The step asked for "a test that the same violation rate produces the same λ trajectory
+under two different reward scales". That test now exists
+(`test_the_same_violation_rate_gives_the_same_lambda_trajectory_at_two_reward_scales`)
+and it passes — **but it would also have passed before the fix**, and it is worth being
+precise about why, because the audit's wording invites the wrong conclusion.
+
+`STEMSAgent._update_lambdas` is a PID controller on the measured episode-mean cost rate
+against `cost_limit`. It never reads the reward, the reward scale or the advantages. So λ
+itself was never reward-scale dependent, before or after. The scale problem B3 identifies
+is real but it is in the **objective** `A_eff`, not in the dual update: a given λ bought a
+different amount of constraint pressure depending on the spread of the cost advantages.
+That is what 3.3 fixes and what the invariance tests measure. The λ-trajectory test is
+kept as a regression guard so a future change to `_update_lambdas` cannot introduce a
+reward-scale dependence unnoticed, and its docstring says exactly this.

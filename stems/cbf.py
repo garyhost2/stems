@@ -198,6 +198,31 @@ class CBFShield:
 
     def _apply_hvac_power_guard(self, safe: np.ndarray,
                                 states: List[np.ndarray]) -> np.ndarray:
+        """Trim the heat-pump action to the per-building and district import caps.
+
+        Two stages, both on the *achieved* import rather than on the action:
+
+        1. per building, clip ``|a_hvac|`` so that ``net_b + |a_b|*p_nom_b`` stays under
+           a cap derated by the coefficient-of-performance shortfall at the current
+           outdoor temperature;
+        2. district-wide, bisect one common shed factor ``s`` in [0, 1] applied to every
+           building's heat-pump draw until ``sum_b max(net_b + s*|a_b|*p_nom_b, 0)``
+           meets the grid cap.
+
+        Stage 2 used to be ``safe[:, hvac] *= g_cap / total`` (audit B1). That does not
+        bring the import to the cap, because ``total`` contains the uncontrollable
+        ``net`` term, which the rescale cannot touch: with ``net`` alone above the cap no
+        factor works, and with ``net`` below it the factor over-sheds. It is the same
+        arithmetic error that was found and corrected in the battery grid guard
+        (``_apply_power_guard``); this is now the same bisection.
+
+        Dimensional caveat: ``safe[:, hvac_idx]`` is a power fraction only when the
+        environment runs with ``hvac_control="power"``. Under ``hvac_control="setpoint"``
+        -- the default for the house scenarios -- that column is a +/-1.5 degC set-point
+        offset and multiplying it by ``p_nom`` is meaningless. The guard is reached only
+        when a ``cop_model`` is passed, which ``experiments/controllers.py`` does not do;
+        see CHANGELOG.md for that decision.
+        """
         if self.cop_model is None or self.hvac_idx < 0:
             return safe
         net = np.array([float(s[_IDX_NET]) for s in states], dtype=np.float32)
@@ -224,10 +249,24 @@ class CBFShield:
             allowed = max(0.0, (p_cap[i] - net[i]) / max(p_nom[i], 1e-6))
             safe[i, self.hvac_idx] = float(np.sign(a_hvac[i]) *
                                            min(abs(a_hvac[i]), allowed))
-        total = float(np.maximum(net + np.abs(safe[:, self.hvac_idx]) * p_nom, 0.0).sum())
+        a_hvac_now = safe[:, self.hvac_idx].copy()
         g_cap = self.grid_cap()
-        if total > g_cap and total > 1e-6:
-            safe[:, self.hvac_idx] *= g_cap / total
+
+        def shed(s: float) -> np.ndarray:
+            """The action array the guard would actually store for shed factor s."""
+            return (a_hvac_now * np.float32(s)).astype(np.float32)
+
+        def imported(s: float) -> float:
+            return float(np.maximum(net + np.abs(shed(s)) * p_nom, 0.0).sum())
+
+        if imported(1.0) > g_cap and float(np.abs(a_hvac_now).sum()) > 1e-9:
+            lo_s, hi_s = 0.0, 1.0
+            for _ in range(30):
+                mid = 0.5 * (lo_s + hi_s)
+                lo_s, hi_s = (mid, hi_s) if imported(mid) <= g_cap else (lo_s, mid)
+            # `shed` is evaluated on the float32 values that get written back, so the
+            # invariant the bisection established is the one the caller observes.
+            safe[:, self.hvac_idx] = shed(lo_s)
         return safe
 
 

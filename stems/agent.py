@@ -241,6 +241,32 @@ class STEMSAgent:
             adv[t] = last
         return adv
 
+    @staticmethod
+    def effective_advantage(adv: torch.Tensor, cadv: torch.Tensor,
+                            lam_k: torch.Tensor) -> torch.Tensor:
+        """Combine the reward and cost advantages into the PPO-Lagrangian objective.
+
+        ``adv`` is (N, B) and already standardised to zero mean and unit variance over
+        the time axis; ``cadv`` is (N, B, K) for K constraints; ``lam_k`` is (K,) and
+        non-negative. Returns (N, B)::
+
+            A_eff = (A - sum_k lambda_k * A^c_k) / (1 + sum_k lambda_k)
+
+        The cost advantage is standardised over the time axis here, exactly as the
+        reward advantage is. It used to be mean-centred only (audit B3), which left the
+        two terms on incompatible scales: with 0/1 indicator costs and gamma = 0.99 the
+        cost advantage has a spread of order 10 while ``adv`` has unit variance, so
+        lambda's effective weight depended on the raw spread of the costs rather than on
+        the constraint. A lambda tuned on one scenario did not transfer to another, and
+        the per-episode lambda traces logged by different runs were not comparable.
+
+        With the standardisation, ``A_eff`` is invariant to a positive rescaling of
+        either the rewards or the costs, so lambda has the same meaning across
+        scenarios: it is a trade-off weight between two unit-variance quantities.
+        """
+        cadv = (cadv - cadv.mean(0)) / (cadv.std(0) + 1e-8)
+        return (adv - (cadv * lam_k).sum(-1)) / (1.0 + lam_k.sum())
+
     def _update_lambdas(self, mean_costs: torch.Tensor) -> None:
         lag = self.cfg.lagrangian
         with torch.no_grad():
@@ -324,9 +350,8 @@ class STEMSAgent:
                 cnv = torch.stack([self.cost_critics[b % len(self.cost_critics)](repr_next[:, b]) for b in range(B)], 1)
                 cadv = self._compute_gae(costs, cv, cnv, episode_end, gamma, lam)
                 cost_returns = cadv + cv
-                cadv = cadv - cadv.mean(0)
                 lam_k = torch.clamp(self._lambdas, min=0.0)
-                eff_adv = (adv - (cadv * lam_k).sum(-1)) / (1.0 + lam_k.sum())
+                eff_adv = self.effective_advantage(adv, cadv, lam_k)
             else:
                 cost_returns, eff_adv = None, adv
 
