@@ -30,3 +30,6 @@ third_party/
 
 # Written by scripts/resume.sh with machine-specific absolute paths
 scripts/env.sh
+
+# Session transcripts: kept locally, NOT published (this repo is public)
+docs/sessions/
