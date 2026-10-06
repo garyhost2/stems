@@ -1020,3 +1020,118 @@ the constraint channel is a `(B,)` 0/1 array; and the fade KPIs appear next to
 `tests/test_constraint_mechanisms.py::test_the_degradation_arm_runs_end_to_end_and_reports_fade`.
 
 ---
+
+## Step 3 — A second constrained-RL family, and the fate of the learned filter
+
+### 3.1 FOCOPS against the same cost critics
+
+**What.** `stems/agent.py` gained `STEMSAgent.focops_advantage` and
+`STEMSAgent._focops_loss`, selected by `LagrangianConfig.algorithm` ∈
+`{"ppo-lagrangian", "focops"}` (`CONSTRAINED_ALGORITHMS`). FOCOPS — First Order
+Constrained Optimization in Policy Space, Zhang, Vuong and Ross, NeurIPS 2020 — moves
+the policy towards the non-parametric optimum `π* ∝ π_k exp((A − ν A_C)/τ)` by
+first-order descent on `KL(π_θ ‖ π*)`, giving the surrogate
+
+```
+L = E_{a~π_k} [ ( KL(π_θ‖π_k)[s] − (1/τ) r(θ) (A − ν A_C) ) · 1{KL ≤ δ} ]
+```
+
+**Why FOCOPS and not CPO.** CPO needs a conjugate-gradient solve of the Fisher system
+and a backtracking line search per update, i.e. a second-order machinery that shares
+nothing with the existing first-order Adam path. FOCOPS is first-order, so it reuses
+the identical optimiser, encoder and critics, and the comparison is between surrogates
+rather than between optimisers.
+
+**What is shared, deliberately.** The same `CostCritic` ensemble, the same width, the
+same generalised-advantage estimates, the same encoder, the same standardisation of the
+reward and cost advantages, the same multiplier state tensors, the same minibatching
+and the same value and entropy losses. `focops_advantage` differs from
+`effective_advantage` by exactly the missing `1/(1 + Σν_k)` denominator — a test asserts
+`focops / (1 + Σν) == lagrangian` to `atol=1e-6` — because FOCOPS divides by its
+temperature `τ` instead. The trust region `δ` defaults to `TrainingConfig.target_kl`
+(0.02), the same threshold PPO already uses for early stopping, so the two families
+operate in trust regions of the same size and the comparison is not confounded by it.
+
+**Two deviations, stated rather than hidden.** (a) `π_k`'s distribution parameters are
+not in the buffer — only its log-probabilities are — so `KL(π_θ‖π_k)` is estimated with
+the standard non-negative, differentiable estimator `E[r log r − (r − 1)]` rather than
+in closed form. (b) The published FOCOPS updates `ν` by plain projected gradient; here
+`ν` is updated by whatever `LagrangianConfig` says, which defaults to this repository's
+PID controller. That keeps the *only* difference between the two arms the actor
+surrogate, which is what the brief asks for; setting `use_pid=False` recovers the
+published update, and a run that wants the published algorithm should.
+
+### 3.2 What our cost critics actually measure, named
+
+**What.** `stems/config.py` now carries `BASE_CONSTRAINT_CHANNELS` with the definition
+written next to it, and `constraint_channel_names(config)` as the one source of truth
+for the channel list, its order and the critic width.
+
+Every channel is a **per-step 0/1 indicator, evaluated per building**:
+
+| channel | indicator |
+|---|---|
+| `soc_band` | `1{state of charge after the step outside [SOC_min, SOC_max]}` |
+| `building_power_cap` | `1{|net electricity consumption| > P_building_max}` |
+| `district_import_cap` | `1{Σ_b max(net_b, 0) > P_grid_max}`, identical for every b |
+| `battery_degradation` | `1{ΔQ_t > L/T}`, present only when a budget is set |
+
+So the quantity the cost critics estimate is a **discounted expected fraction of
+violating steps** (GAE with γ = 0.99, λ = 0.95 on those indicators), and the quantity
+the PID controller compares against `cost_limit` is the **undiscounted mean of the
+indicators over the batch and over buildings**. In the three incompatible definitions
+the literature track found — average episodic cost against a limit, fraction of
+violating steps, and fraction of episodes with any violation — ours is the **fraction
+of violating building-steps**. The literature track established that no common protocol
+exists across the constrained-RL papers and that the three are not interconvertible, so
+this definition has to travel with every number we report. `MetricsCalculator`'s
+`safety_violation_rate`, `soc_violation_rate`, `power_violation_rate` and
+`grid_violation_rate` are the same fraction measured on the evaluation rollout, which
+is why they are comparable with the training-time cost at all.
+
+Note the one asymmetry a reader should know about: `district_import_cap` is a district
+quantity broadcast to every building, so a violating step contributes `B` violating
+building-steps to that channel while a single building's `soc_band` violation
+contributes one. The channels are therefore comparable across *arms* but not across
+*channels*.
+
+### 3.3 `NeuralSafetyFilter` removed
+
+**What.** Deleted from `stems/cbf.py`, with the argument left in a comment at the site.
+`import torch` and `import torch.nn as nn` went with it; they had no other user in that
+module.
+
+**Why remove rather than train it against the LP shield.** Three reasons.
+
+1. **It can only lose on the axis we report.** A learned regression onto the shield's
+   output carries no certificate that its output lies in the safe set. The repository's
+   constraint claim is that the projection is *exact* against the simulator's own plant
+   model; replacing it with an approximation can only raise the violation rate, and
+   there is nothing it can win back.
+2. **There is no cost to amortise.** A learned safety filter earns its place when it
+   replaces an expensive online optimisation. Here the exact battery inverse is a
+   24-iteration bisection on a scalar (`BatteryModel.safe_interval`) and the only
+   optimisation in the loop is the fleet LP, which the filter was not written to
+   replace. Trained, it would be a slower, less accurate version of a microsecond
+   closed form.
+3. **It did not implement its own interface.** `num_ensemble=5` and
+   `uncertainty_threshold=0.05` are parameters of an ensemble-with-uncertainty-gate
+   mechanism; the class held one trunk and one head, built no ensemble, and never read
+   the threshold. Keeping it would have meant first fixing dead code to match its own
+   signature.
+
+**What this costs.** The brief's four constraint families become three: PID-Lagrangian,
+FOCOPS, and projection (the exact barrier plus the LP fleet shield, which covers both
+"safety layer / shielding" and "action projection"). That is still a comparison across
+mechanism families, and it is an honest one.
+
+**Evidence.** `tests/test_constraint_mechanisms.py`: both families registered and
+`ppo-lagrangian` the default; an unknown family raises; FOCOPS and PPO-Lagrangian share
+the cost-critic class, width and multiplier shapes; FOCOPS takes gradient steps on the
+mock and on the real simulator and reports `mechanism_algorithm == "focops"`; the KL
+estimate is exactly zero at the behaviour policy and non-negative away from it; the two
+advantage combinations differ by exactly the Lagrangian denominator; and
+`stems.cbf` no longer has the attribute, with a tree scan asserting nothing constructs
+it.
+
+---

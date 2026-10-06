@@ -3,8 +3,6 @@ from __future__ import annotations
 from typing import List, Optional, Tuple
 
 import numpy as np
-import torch
-import torch.nn as nn
 
 from stems.battery import BatteryModel
 from stems.config import CBFConfig, SafetyConfig
@@ -294,32 +292,12 @@ class CBFShield:
         return costs
 
 
-class NeuralSafetyFilter(nn.Module):
-    def __init__(self, obs_dim: int, action_dim: int, hidden_dim: int = 128,
-                 num_ensemble: int = 5, dropout_rate: float = 0.1,
-                 uncertainty_threshold: float = 0.05,
-                 cbf_shield: Optional[CBFShield] = None) -> None:
-        super().__init__()
-        self.obs_dim = obs_dim
-        self.action_dim = action_dim
-        self.E = num_ensemble
-        self.uncertainty_threshold = uncertainty_threshold
-        self.cbf = cbf_shield
-        self.trunk = nn.Sequential(
-            nn.Linear(obs_dim + action_dim, hidden_dim), nn.LayerNorm(hidden_dim),
-            nn.ReLU(), nn.Dropout(dropout_rate),
-            nn.Linear(hidden_dim, hidden_dim), nn.LayerNorm(hidden_dim),
-            nn.ReLU(), nn.Dropout(dropout_rate),
-            nn.Linear(hidden_dim, hidden_dim), nn.LayerNorm(hidden_dim),
-            nn.ReLU(), nn.Dropout(dropout_rate),
-        )
-        self.head = nn.Sequential(nn.Linear(hidden_dim, action_dim), nn.Tanh())
-        nn.init.uniform_(self.head[0].weight, -3e-3, 3e-3)
-        nn.init.uniform_(self.head[0].bias, -3e-3, 3e-3)
-
-    def forward(self, obs: torch.Tensor, a_nom: torch.Tensor) -> torch.Tensor:
-        return self.head(self.trunk(torch.cat([obs, a_nom], dim=-1)))
-
-    def loss(self, obs: torch.Tensor, a_nom: torch.Tensor,
-             a_safe_qp: torch.Tensor) -> torch.Tensor:
-        return nn.functional.mse_loss(self.forward(obs, a_nom), a_safe_qp)
+# `NeuralSafetyFilter` -- an untrained, uncalled network that regressed a nominal action
+# onto the shield's output -- was removed here. The argument is in CHANGELOG.md under
+# step 3: it would have been a *learned approximation to an exact, closed-form
+# projection*, so it can only lose on the one axis this repository reports (constraint
+# violation rate) while buying nothing on the axis that would justify it (solve time:
+# the exact inverse is a 24-iteration bisection on a scalar, and the fleet LP is the
+# only optimisation in the loop). Its declared ensemble (`num_ensemble=5`) and
+# uncertainty gate (`uncertainty_threshold`) were parameters of a mechanism the class
+# did not implement -- one trunk, one head, no ensemble, no gate.

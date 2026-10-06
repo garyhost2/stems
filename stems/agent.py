@@ -16,6 +16,11 @@ from stems.cbf import CBFShield
 from stems.graph import BuildingGraph
 from stems.utils import RunningNormalizer
 
+#: Constrained-policy-optimisation families sharing the cost critics. Both train the
+#: same CostCritic ensemble on the same generalised-advantage estimates; they differ in
+#: the actor surrogate only. See `stems/config.py::LagrangianConfig`.
+CONSTRAINED_ALGORITHMS = ("ppo-lagrangian", "focops")
+
 
 class Actor(nn.Module):
     LOG_STD_MIN: float = -5.0
@@ -267,8 +272,64 @@ class STEMSAgent:
         cadv = (cadv - cadv.mean(0)) / (cadv.std(0) + 1e-8)
         return (adv - (cadv * lam_k).sum(-1)) / (1.0 + lam_k.sum())
 
+    @staticmethod
+    def focops_advantage(adv: torch.Tensor, cadv: torch.Tensor,
+                         nu_k: torch.Tensor) -> torch.Tensor:
+        """The FOCOPS combination ``A - sum_k nu_k A^c_k``, (N, B).
+
+        Identical inputs to :meth:`effective_advantage` -- the same standardised reward
+        advantage and the same cost advantages, standardised the same way -- and the
+        same non-negative multiplier state. The one difference from the Lagrangian
+        combination is the missing ``1 / (1 + sum_k nu_k)`` denominator: FOCOPS divides
+        by its temperature instead, in :meth:`_focops_loss`. Keeping the standardisation
+        identical is what makes a comparison between the two families a comparison of
+        the mechanism rather than of the advantage scaling.
+        """
+        cadv = (cadv - cadv.mean(0)) / (cadv.std(0) + 1e-8)
+        return adv - (cadv * nu_k).sum(-1)
+
+    def _focops_loss(self, logp: torch.Tensor, old_logp: torch.Tensor,
+                     advantage: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """FOCOPS actor loss for one building's minibatch, and its KL estimate.
+
+        Following Zhang, Vuong and Ross (NeurIPS 2020), the non-parametric optimum of
+        the constrained problem inside a KL ball is
+        ``pi*(a|s) ~ pi_k(a|s) exp((A - nu A_C) / tau)``, and the policy is moved
+        towards it by first-order descent on ``KL(pi_theta || pi*)``, which up to terms
+        constant in theta is::
+
+            L = E_{a ~ pi_k} [ ( KL(pi_theta || pi_k)[s]
+                                 - (1/tau) * r(theta) * (A - nu A_C) ) * 1{KL <= delta} ]
+
+        with ``r(theta) = pi_theta(a|s) / pi_k(a|s)``. ``tau`` is
+        ``LagrangianConfig.focops_temperature`` and ``delta`` is ``focops_kl_limit``.
+
+        The behaviour policy's distribution parameters are not stored in the buffer --
+        only its log-probabilities are -- so ``KL(pi_theta || pi_k)`` is estimated from
+        the importance ratio with the standard low-variance, non-negative estimator
+        ``E_{a ~ pi_k}[ r log r - (r - 1) ]``. It is unbiased for the forward KL and
+        differentiable in theta, which is what the surrogate needs. The indicator uses
+        the detached estimate, so a sample outside the trust region contributes no
+        gradient rather than a clipped one -- the FOCOPS counterpart of PPO's clip.
+        """
+        lag = self.cfg.lagrangian
+        tau = max(float(lag.focops_temperature), 1e-6)
+        delta = lag.focops_kl_limit
+        if delta is None:
+            delta = self.cfg.training.target_kl
+        delta = float(delta) if delta else float("inf")
+
+        log_ratio = (logp - old_logp).clamp(-20.0, 20.0)
+        ratio = log_ratio.exp()
+        kl = ratio * log_ratio - (ratio - 1.0)
+        inside = (kl.detach() <= delta).to(kl.dtype)
+        loss = ((kl - (1.0 / tau) * ratio * advantage) * inside).mean()
+        return loss, kl
+
     def _update_lambdas(self, mean_costs: torch.Tensor) -> None:
         lag = self.cfg.lagrangian
+        if not lag.enabled:
+            return
         with torch.no_grad():
             err = mean_costs - self._cost_limit
             if lag.use_pid:
@@ -291,6 +352,12 @@ class STEMSAgent:
         if cfgt.actor_target not in ("raw", "safe"):
             raise ValueError(f"unknown actor_target {cfgt.actor_target!r}")
         raw_target = cfgt.actor_target == "raw"
+        if self.cfg.lagrangian.algorithm not in CONSTRAINED_ALGORITHMS:
+            raise ValueError(f"unknown constrained algorithm "
+                             f"{self.cfg.lagrangian.algorithm!r}; "
+                             f"choose from {sorted(CONSTRAINED_ALGORITHMS)}")
+        focops = (self.cfg.lagrangian.enabled
+                  and self.cfg.lagrangian.algorithm == "focops")
 
         required = ["history", "next_history", "safe_actions"]
         if raw_target:
@@ -350,8 +417,17 @@ class STEMSAgent:
                 cnv = torch.stack([self.cost_critics[b % len(self.cost_critics)](repr_next[:, b]) for b in range(B)], 1)
                 cadv = self._compute_gae(costs, cv, cnv, episode_end, gamma, lam)
                 cost_returns = cadv + cv
+                # The cost critics are trained in every arm, including mechanism="none":
+                # they are the measurement instrument for the violation rate, and the
+                # arms have to measure it the same way to be comparable. What
+                # `enabled` switches off is only their effect on the actor.
                 lam_k = torch.clamp(self._lambdas, min=0.0)
-                eff_adv = self.effective_advantage(adv, cadv, lam_k)
+                if not self.cfg.lagrangian.enabled:
+                    eff_adv = adv
+                elif focops:
+                    eff_adv = self.focops_advantage(adv, cadv, lam_k)
+                else:
+                    eff_adv = self.effective_advantage(adv, cadv, lam_k)
             else:
                 cost_returns, eff_adv = None, adv
 
@@ -395,8 +471,14 @@ class STEMSAgent:
                     log_ratio = logp - old_logp[idx, b]
                     ratio = log_ratio.clamp(-20.0, 20.0).exp()
                     a_b = eff_adv[idx, b]
-                    policy_loss = policy_loss - torch.min(
-                        ratio * a_b, ratio.clamp(1.0 - clip, 1.0 + clip) * a_b).mean()
+                    if focops:
+                        # FOCOPS already carries its own sign: it is a loss to be
+                        # minimised, not an objective to be negated.
+                        f_loss, _ = self._focops_loss(logp, old_logp[idx, b], a_b)
+                        policy_loss = policy_loss + f_loss
+                    else:
+                        policy_loss = policy_loss - torch.min(
+                            ratio * a_b, ratio.clamp(1.0 - clip, 1.0 + clip) * a_b).mean()
                     entropy = entropy + dist.entropy()[..., self._ctrl].sum(-1).mean()
                     value_loss = value_loss + F.mse_loss(self.critics[b % len(self.critics)](r_b), returns[idx, b])
                     if cost_returns is not None:
@@ -432,6 +514,8 @@ class STEMSAgent:
         return {**{key: v / k for key, v in sums.items()},
                 "gradient_steps": n_updates, "stopped_early": stopped_early,
                 "reward_scale": scale,
+                "mechanism_algorithm": (self.cfg.lagrangian.algorithm
+                                        if self.cfg.lagrangian.enabled else "none"),
                 "lambdas": self._lambdas.detach().cpu().tolist()}
 
     def save(self, path: str) -> None:
