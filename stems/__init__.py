@@ -6,6 +6,8 @@ from stems.protocols import (Environment, EVProvider, PlantModel, PlantProvider,
                              missing_capabilities)
 from stems.replay import CSVReplayEnvironment
 from stems.graph import BuildingGraph
+from stems.legionella import (LegionellaCycleBarrier, LegionellaSpec,
+                              LegionellaStack, ShadowTank)
 from stems.encoder import STEncoder
 from stems.cbf import CBFShield
 from stems.reward import STEMSReward
@@ -58,6 +60,10 @@ FRAMEWORK_EXPORTS = {
     "PlantProvider",
     "EVProvider",
     "CSVReplayEnvironment",
+    "LegionellaCycleBarrier",
+    "LegionellaSpec",
+    "LegionellaStack",
+    "ShadowTank",
     "missing_capabilities",
 }
 

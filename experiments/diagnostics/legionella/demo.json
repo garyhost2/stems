@@ -1,0 +1,1623 @@
+{
+  "schema": "citylearn_schemas/tx_travis_8b/schema.json",
+  "steps": 336,
+  "buildings": 8,
+  "mean_daily_demand_kwh": [
+    8.4145,
+    5.1997,
+    1.2366,
+    9.9684,
+    2.0415,
+    6.3081,
+    8.2095,
+    9.9227
+  ],
+  "sizing_rule": "mean daily demand / 4 h (docs/dhw_legionella_design.md)",
+  "temperatures_are_assumptions_of_this_diagnostic": {
+    "t_cold_c": 10.0,
+    "t_rated_c": 60.0,
+    "t_normal_c": 50.0,
+    "t_legionella_c": 60.0,
+    "t_heat_pump_max_c": 55.0,
+    "cop_legionella": 2.5,
+    "element_efficiency": 1.0
+  },
+  "runs": [
+    {
+      "service": {
+        "unmet_kwh": 4.1733856664315,
+        "demand_kwh": 718.213843178004,
+        "unmet_share_of_demand": 0.005810784219870789,
+        "unmet_draws": 3,
+        "draws": 923,
+        "unmet_share_of_draws": 0.0032502708559046588,
+        "heat_kwh": 788.6444819050398,
+        "electricity_kwh": 315.45779276201574,
+        "spill_kwh": 0.0,
+        "steps": 336
+      },
+      "cycle": {
+        "cycles_completed": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "missed_windows": [
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2
+        ],
+        "steps_since_cycle": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "soc_legionella": 1.0,
+        "period_steps": 168.0
+      },
+      "spec": {
+        "capacity_kwh": [
+          6.7571,
+          7.2827,
+          7.5896,
+          10.1601,
+          6.5602,
+          11.175,
+          10.9894,
+          11.2002
+        ],
+        "heat_source_kw": [
+          0.5259,
+          0.325,
+          0.0773,
+          0.623,
+          0.1276,
+          0.3943,
+          0.5131,
+          0.6202
+        ],
+        "t_cold_c": 10.0,
+        "t_rated_c": 60.0,
+        "t_normal_c": 50.0,
+        "t_legionella_c": 60.0,
+        "soc_normal": 0.8,
+        "soc_legionella": 1.0,
+        "soc_heat_pump_max": 0.9,
+        "cop_legionella": 2.5,
+        "element_efficiency": 1.0,
+        "period_hours": 168.0,
+        "rate_soc_per_step": [
+          0.07783,
+          0.04462,
+          0.01018,
+          0.06132,
+          0.01945,
+          0.03528,
+          0.04669,
+          0.05537
+        ],
+        "net_rate_soc_per_step": [
+          0.07546,
+          0.04054,
+          0.00185,
+          0.05541,
+          0.01316,
+          0.02872,
+          0.04101,
+          0.04815
+        ],
+        "draw_margin_kwh": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "hours_to_disinfect_from_normal": [
+          2.65,
+          4.933,
+          107.967,
+          3.609,
+          15.203,
+          6.965,
+          4.877,
+          4.153
+        ],
+        "unsourced_parameters": [
+          "heat_source_kw",
+          "t_cold_c",
+          "t_rated_c",
+          "t_normal_c",
+          "t_legionella_c",
+          "cop_legionella",
+          "element_efficiency",
+          "t_heat_pump_max_c"
+        ],
+        "provenance": {
+          "capacity_kwh": "schema citylearn_schemas/tx_travis_8b/schema.json, dhw_storage.capacity",
+          "loss_coefficient": "schema citylearn_schemas/tx_travis_8b/schema.json, dhw_storage"
+        }
+      },
+      "cycle_enforced": false,
+      "sweep": "sizing",
+      "sizing_multiplier": 0.25,
+      "reserve_quantile": 0.5,
+      "heat_source_kw": [
+        0.5259,
+        0.325,
+        0.0773,
+        0.623,
+        0.1276,
+        0.3943,
+        0.5131,
+        0.6202
+      ],
+      "draw_margin_kwh": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "service": {
+        "unmet_kwh": 4.173385666420066,
+        "demand_kwh": 718.213843178004,
+        "unmet_share_of_demand": 0.005810784219854871,
+        "unmet_draws": 3,
+        "draws": 923,
+        "unmet_share_of_draws": 0.0032502708559046588,
+        "heat_kwh": 790.2280790960922,
+        "electricity_kwh": 317.0019284651512,
+        "spill_kwh": 0.0,
+        "steps": 336
+      },
+      "cycle": {
+        "cycles_completed": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "missed_windows": [
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2
+        ],
+        "steps_since_cycle": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "soc_legionella": 1.0,
+        "period_steps": 168.0
+      },
+      "spec": {
+        "capacity_kwh": [
+          6.7571,
+          7.2827,
+          7.5896,
+          10.1601,
+          6.5602,
+          11.175,
+          10.9894,
+          11.2002
+        ],
+        "heat_source_kw": [
+          0.5259,
+          0.325,
+          0.0773,
+          0.623,
+          0.1276,
+          0.3943,
+          0.5131,
+          0.6202
+        ],
+        "t_cold_c": 10.0,
+        "t_rated_c": 60.0,
+        "t_normal_c": 50.0,
+        "t_legionella_c": 60.0,
+        "soc_normal": 0.8,
+        "soc_legionella": 1.0,
+        "soc_heat_pump_max": 0.9,
+        "cop_legionella": 2.5,
+        "element_efficiency": 1.0,
+        "period_hours": 168.0,
+        "rate_soc_per_step": [
+          0.07783,
+          0.04462,
+          0.01018,
+          0.06132,
+          0.01945,
+          0.03528,
+          0.04669,
+          0.05537
+        ],
+        "net_rate_soc_per_step": [
+          0.07546,
+          0.04054,
+          0.00185,
+          0.05541,
+          0.01316,
+          0.02872,
+          0.04101,
+          0.04815
+        ],
+        "draw_margin_kwh": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "hours_to_disinfect_from_normal": [
+          2.65,
+          4.933,
+          107.967,
+          3.609,
+          15.203,
+          6.965,
+          4.877,
+          4.153
+        ],
+        "unsourced_parameters": [
+          "heat_source_kw",
+          "t_cold_c",
+          "t_rated_c",
+          "t_normal_c",
+          "t_legionella_c",
+          "cop_legionella",
+          "element_efficiency",
+          "t_heat_pump_max_c"
+        ],
+        "provenance": {
+          "capacity_kwh": "schema citylearn_schemas/tx_travis_8b/schema.json, dhw_storage.capacity",
+          "loss_coefficient": "schema citylearn_schemas/tx_travis_8b/schema.json, dhw_storage"
+        }
+      },
+      "cycle_enforced": true,
+      "sweep": "sizing",
+      "sizing_multiplier": 0.25,
+      "reserve_quantile": 0.5,
+      "heat_source_kw": [
+        0.5259,
+        0.325,
+        0.0773,
+        0.623,
+        0.1276,
+        0.3943,
+        0.5131,
+        0.6202
+      ],
+      "draw_margin_kwh": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "service": {
+        "unmet_kwh": 0.0,
+        "demand_kwh": 718.213843178004,
+        "unmet_share_of_demand": 0.0,
+        "unmet_draws": 0,
+        "draws": 923,
+        "unmet_share_of_draws": 0.0,
+        "heat_kwh": 825.9776373284304,
+        "electricity_kwh": 343.39925036728414,
+        "spill_kwh": 0.0,
+        "steps": 336
+      },
+      "cycle": {
+        "cycles_completed": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "missed_windows": [
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2
+        ],
+        "steps_since_cycle": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "soc_legionella": 1.0,
+        "period_steps": 168.0
+      },
+      "spec": {
+        "capacity_kwh": [
+          6.7571,
+          7.2827,
+          7.5896,
+          10.1601,
+          6.5602,
+          11.175,
+          10.9894,
+          11.2002
+        ],
+        "heat_source_kw": [
+          1.0518,
+          0.65,
+          0.1546,
+          1.246,
+          0.2552,
+          0.7885,
+          1.0262,
+          1.2403
+        ],
+        "t_cold_c": 10.0,
+        "t_rated_c": 60.0,
+        "t_normal_c": 50.0,
+        "t_legionella_c": 60.0,
+        "soc_normal": 0.8,
+        "soc_legionella": 1.0,
+        "soc_heat_pump_max": 0.9,
+        "cop_legionella": 2.5,
+        "element_efficiency": 1.0,
+        "period_hours": 168.0,
+        "rate_soc_per_step": [
+          0.15566,
+          0.08925,
+          0.02037,
+          0.12264,
+          0.0389,
+          0.07056,
+          0.09338,
+          0.11074
+        ],
+        "net_rate_soc_per_step": [
+          0.15329,
+          0.08517,
+          0.01204,
+          0.11673,
+          0.03261,
+          0.064,
+          0.0877,
+          0.10352
+        ],
+        "draw_margin_kwh": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "hours_to_disinfect_from_normal": [
+          1.305,
+          2.348,
+          16.618,
+          1.713,
+          6.134,
+          3.125,
+          2.28,
+          1.932
+        ],
+        "unsourced_parameters": [
+          "heat_source_kw",
+          "t_cold_c",
+          "t_rated_c",
+          "t_normal_c",
+          "t_legionella_c",
+          "cop_legionella",
+          "element_efficiency",
+          "t_heat_pump_max_c"
+        ],
+        "provenance": {
+          "capacity_kwh": "schema citylearn_schemas/tx_travis_8b/schema.json, dhw_storage.capacity",
+          "loss_coefficient": "schema citylearn_schemas/tx_travis_8b/schema.json, dhw_storage"
+        }
+      },
+      "cycle_enforced": false,
+      "sweep": "sizing",
+      "sizing_multiplier": 0.5,
+      "reserve_quantile": 0.5,
+      "heat_source_kw": [
+        1.0518,
+        0.65,
+        0.1546,
+        1.246,
+        0.2552,
+        0.7885,
+        1.0262,
+        1.2403
+      ],
+      "draw_margin_kwh": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "service": {
+        "unmet_kwh": 0.0,
+        "demand_kwh": 718.213843178004,
+        "unmet_share_of_demand": 0.0,
+        "unmet_draws": 0,
+        "draws": 923,
+        "unmet_share_of_draws": 0.0,
+        "heat_kwh": 834.4188027221556,
+        "electricity_kwh": 358.4635518173948,
+        "spill_kwh": 0.0,
+        "steps": 336
+      },
+      "cycle": {
+        "cycles_completed": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "missed_windows": [
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2
+        ],
+        "steps_since_cycle": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "soc_legionella": 1.0,
+        "period_steps": 168.0
+      },
+      "spec": {
+        "capacity_kwh": [
+          6.7571,
+          7.2827,
+          7.5896,
+          10.1601,
+          6.5602,
+          11.175,
+          10.9894,
+          11.2002
+        ],
+        "heat_source_kw": [
+          1.0518,
+          0.65,
+          0.1546,
+          1.246,
+          0.2552,
+          0.7885,
+          1.0262,
+          1.2403
+        ],
+        "t_cold_c": 10.0,
+        "t_rated_c": 60.0,
+        "t_normal_c": 50.0,
+        "t_legionella_c": 60.0,
+        "soc_normal": 0.8,
+        "soc_legionella": 1.0,
+        "soc_heat_pump_max": 0.9,
+        "cop_legionella": 2.5,
+        "element_efficiency": 1.0,
+        "period_hours": 168.0,
+        "rate_soc_per_step": [
+          0.15566,
+          0.08925,
+          0.02037,
+          0.12264,
+          0.0389,
+          0.07056,
+          0.09338,
+          0.11074
+        ],
+        "net_rate_soc_per_step": [
+          0.15329,
+          0.08517,
+          0.01204,
+          0.11673,
+          0.03261,
+          0.064,
+          0.0877,
+          0.10352
+        ],
+        "draw_margin_kwh": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "hours_to_disinfect_from_normal": [
+          1.305,
+          2.348,
+          16.618,
+          1.713,
+          6.134,
+          3.125,
+          2.28,
+          1.932
+        ],
+        "unsourced_parameters": [
+          "heat_source_kw",
+          "t_cold_c",
+          "t_rated_c",
+          "t_normal_c",
+          "t_legionella_c",
+          "cop_legionella",
+          "element_efficiency",
+          "t_heat_pump_max_c"
+        ],
+        "provenance": {
+          "capacity_kwh": "schema citylearn_schemas/tx_travis_8b/schema.json, dhw_storage.capacity",
+          "loss_coefficient": "schema citylearn_schemas/tx_travis_8b/schema.json, dhw_storage"
+        }
+      },
+      "cycle_enforced": true,
+      "sweep": "sizing",
+      "sizing_multiplier": 0.5,
+      "reserve_quantile": 0.5,
+      "heat_source_kw": [
+        1.0518,
+        0.65,
+        0.1546,
+        1.246,
+        0.2552,
+        0.7885,
+        1.0262,
+        1.2403
+      ],
+      "draw_margin_kwh": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "service": {
+        "unmet_kwh": 0.0,
+        "demand_kwh": 718.213843178004,
+        "unmet_share_of_demand": 0.0,
+        "unmet_draws": 0,
+        "draws": 923,
+        "unmet_share_of_draws": 0.0,
+        "heat_kwh": 830.9212078628291,
+        "electricity_kwh": 415.18032544805476,
+        "spill_kwh": 0.0,
+        "steps": 336
+      },
+      "cycle": {
+        "cycles_completed": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "missed_windows": [
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2
+        ],
+        "steps_since_cycle": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "soc_legionella": 1.0,
+        "period_steps": 168.0
+      },
+      "spec": {
+        "capacity_kwh": [
+          6.7571,
+          7.2827,
+          7.5896,
+          10.1601,
+          6.5602,
+          11.175,
+          10.9894,
+          11.2002
+        ],
+        "heat_source_kw": [
+          2.1036,
+          1.2999,
+          0.3091,
+          2.4921,
+          0.5104,
+          1.577,
+          2.0524,
+          2.4807
+        ],
+        "t_cold_c": 10.0,
+        "t_rated_c": 60.0,
+        "t_normal_c": 50.0,
+        "t_legionella_c": 60.0,
+        "soc_normal": 0.8,
+        "soc_legionella": 1.0,
+        "soc_heat_pump_max": 0.9,
+        "cop_legionella": 2.5,
+        "element_efficiency": 1.0,
+        "period_hours": 168.0,
+        "rate_soc_per_step": [
+          0.31132,
+          0.1785,
+          0.04073,
+          0.24528,
+          0.0778,
+          0.14112,
+          0.18676,
+          0.22149
+        ],
+        "net_rate_soc_per_step": [
+          0.30895,
+          0.17441,
+          0.0324,
+          0.23937,
+          0.07151,
+          0.13456,
+          0.18108,
+          0.21427
+        ],
+        "draw_margin_kwh": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "hours_to_disinfect_from_normal": [
+          0.647,
+          1.147,
+          6.173,
+          0.836,
+          2.797,
+          1.486,
+          1.104,
+          0.933
+        ],
+        "unsourced_parameters": [
+          "heat_source_kw",
+          "t_cold_c",
+          "t_rated_c",
+          "t_normal_c",
+          "t_legionella_c",
+          "cop_legionella",
+          "element_efficiency",
+          "t_heat_pump_max_c"
+        ],
+        "provenance": {
+          "capacity_kwh": "schema citylearn_schemas/tx_travis_8b/schema.json, dhw_storage.capacity",
+          "loss_coefficient": "schema citylearn_schemas/tx_travis_8b/schema.json, dhw_storage"
+        }
+      },
+      "cycle_enforced": false,
+      "sweep": "sizing",
+      "sizing_multiplier": 1.0,
+      "reserve_quantile": 0.5,
+      "heat_source_kw": [
+        2.1036,
+        1.2999,
+        0.3091,
+        2.4921,
+        0.5104,
+        1.577,
+        2.0524,
+        2.4807
+      ],
+      "draw_margin_kwh": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "service": {
+        "unmet_kwh": 0.0,
+        "demand_kwh": 718.213843178004,
+        "unmet_share_of_demand": 0.0,
+        "unmet_draws": 0,
+        "draws": 923,
+        "unmet_share_of_draws": 0.0,
+        "heat_kwh": 844.1876595957549,
+        "electricity_kwh": 446.8485723684846,
+        "spill_kwh": 0.0035941194541315724,
+        "steps": 336
+      },
+      "cycle": {
+        "cycles_completed": [
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0
+        ],
+        "missed_windows": [
+          2,
+          2,
+          2,
+          1,
+          2,
+          2,
+          2,
+          2
+        ],
+        "steps_since_cycle": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "soc_legionella": 1.0,
+        "period_steps": 168.0
+      },
+      "spec": {
+        "capacity_kwh": [
+          6.7571,
+          7.2827,
+          7.5896,
+          10.1601,
+          6.5602,
+          11.175,
+          10.9894,
+          11.2002
+        ],
+        "heat_source_kw": [
+          2.1036,
+          1.2999,
+          0.3091,
+          2.4921,
+          0.5104,
+          1.577,
+          2.0524,
+          2.4807
+        ],
+        "t_cold_c": 10.0,
+        "t_rated_c": 60.0,
+        "t_normal_c": 50.0,
+        "t_legionella_c": 60.0,
+        "soc_normal": 0.8,
+        "soc_legionella": 1.0,
+        "soc_heat_pump_max": 0.9,
+        "cop_legionella": 2.5,
+        "element_efficiency": 1.0,
+        "period_hours": 168.0,
+        "rate_soc_per_step": [
+          0.31132,
+          0.1785,
+          0.04073,
+          0.24528,
+          0.0778,
+          0.14112,
+          0.18676,
+          0.22149
+        ],
+        "net_rate_soc_per_step": [
+          0.30895,
+          0.17441,
+          0.0324,
+          0.23937,
+          0.07151,
+          0.13456,
+          0.18108,
+          0.21427
+        ],
+        "draw_margin_kwh": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "hours_to_disinfect_from_normal": [
+          0.647,
+          1.147,
+          6.173,
+          0.836,
+          2.797,
+          1.486,
+          1.104,
+          0.933
+        ],
+        "unsourced_parameters": [
+          "heat_source_kw",
+          "t_cold_c",
+          "t_rated_c",
+          "t_normal_c",
+          "t_legionella_c",
+          "cop_legionella",
+          "element_efficiency",
+          "t_heat_pump_max_c"
+        ],
+        "provenance": {
+          "capacity_kwh": "schema citylearn_schemas/tx_travis_8b/schema.json, dhw_storage.capacity",
+          "loss_coefficient": "schema citylearn_schemas/tx_travis_8b/schema.json, dhw_storage"
+        }
+      },
+      "cycle_enforced": true,
+      "sweep": "sizing",
+      "sizing_multiplier": 1.0,
+      "reserve_quantile": 0.5,
+      "heat_source_kw": [
+        2.1036,
+        1.2999,
+        0.3091,
+        2.4921,
+        0.5104,
+        1.577,
+        2.0524,
+        2.4807
+      ],
+      "draw_margin_kwh": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "service": {
+        "unmet_kwh": 0.0,
+        "demand_kwh": 718.213843178004,
+        "unmet_share_of_demand": 0.0,
+        "unmet_draws": 0,
+        "draws": 923,
+        "unmet_share_of_draws": 0.0,
+        "heat_kwh": 831.6846993270087,
+        "electricity_kwh": 454.05617631971234,
+        "spill_kwh": 0.0,
+        "steps": 336
+      },
+      "cycle": {
+        "cycles_completed": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "missed_windows": [
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2
+        ],
+        "steps_since_cycle": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "soc_legionella": 1.0,
+        "period_steps": 168.0
+      },
+      "spec": {
+        "capacity_kwh": [
+          6.7571,
+          7.2827,
+          7.5896,
+          10.1601,
+          6.5602,
+          11.175,
+          10.9894,
+          11.2002
+        ],
+        "heat_source_kw": [
+          4.2072,
+          2.5998,
+          0.6183,
+          4.9842,
+          1.0208,
+          3.154,
+          4.1048,
+          4.9614
+        ],
+        "t_cold_c": 10.0,
+        "t_rated_c": 60.0,
+        "t_normal_c": 50.0,
+        "t_legionella_c": 60.0,
+        "soc_normal": 0.8,
+        "soc_legionella": 1.0,
+        "soc_heat_pump_max": 0.9,
+        "cop_legionella": 2.5,
+        "element_efficiency": 1.0,
+        "period_hours": 168.0,
+        "rate_soc_per_step": [
+          0.62264,
+          0.35699,
+          0.08146,
+          0.49057,
+          0.1556,
+          0.28224,
+          0.37352,
+          0.44297
+        ],
+        "net_rate_soc_per_step": [
+          0.62027,
+          0.35291,
+          0.07313,
+          0.48466,
+          0.14931,
+          0.27568,
+          0.36784,
+          0.43575
+        ],
+        "draw_margin_kwh": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "hours_to_disinfect_from_normal": [
+          0.322,
+          0.567,
+          2.735,
+          0.413,
+          1.34,
+          0.725,
+          0.544,
+          0.459
+        ],
+        "unsourced_parameters": [
+          "heat_source_kw",
+          "t_cold_c",
+          "t_rated_c",
+          "t_normal_c",
+          "t_legionella_c",
+          "cop_legionella",
+          "element_efficiency",
+          "t_heat_pump_max_c"
+        ],
+        "provenance": {
+          "capacity_kwh": "schema citylearn_schemas/tx_travis_8b/schema.json, dhw_storage.capacity",
+          "loss_coefficient": "schema citylearn_schemas/tx_travis_8b/schema.json, dhw_storage"
+        }
+      },
+      "cycle_enforced": false,
+      "sweep": "sizing",
+      "sizing_multiplier": 2.0,
+      "reserve_quantile": 0.5,
+      "heat_source_kw": [
+        4.2072,
+        2.5998,
+        0.6183,
+        4.9842,
+        1.0208,
+        3.154,
+        4.1048,
+        4.9614
+      ],
+      "draw_margin_kwh": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "service": {
+        "unmet_kwh": 0.0,
+        "demand_kwh": 718.213843178004,
+        "unmet_share_of_demand": 0.0,
+        "unmet_draws": 0,
+        "draws": 923,
+        "unmet_share_of_draws": 0.0,
+        "heat_kwh": 845.318121823813,
+        "electricity_kwh": 486.7761572292377,
+        "spill_kwh": 0.0,
+        "steps": 336
+      },
+      "cycle": {
+        "cycles_completed": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "missed_windows": [
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2
+        ],
+        "steps_since_cycle": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "soc_legionella": 1.0,
+        "period_steps": 168.0
+      },
+      "spec": {
+        "capacity_kwh": [
+          6.7571,
+          7.2827,
+          7.5896,
+          10.1601,
+          6.5602,
+          11.175,
+          10.9894,
+          11.2002
+        ],
+        "heat_source_kw": [
+          4.2072,
+          2.5998,
+          0.6183,
+          4.9842,
+          1.0208,
+          3.154,
+          4.1048,
+          4.9614
+        ],
+        "t_cold_c": 10.0,
+        "t_rated_c": 60.0,
+        "t_normal_c": 50.0,
+        "t_legionella_c": 60.0,
+        "soc_normal": 0.8,
+        "soc_legionella": 1.0,
+        "soc_heat_pump_max": 0.9,
+        "cop_legionella": 2.5,
+        "element_efficiency": 1.0,
+        "period_hours": 168.0,
+        "rate_soc_per_step": [
+          0.62264,
+          0.35699,
+          0.08146,
+          0.49057,
+          0.1556,
+          0.28224,
+          0.37352,
+          0.44297
+        ],
+        "net_rate_soc_per_step": [
+          0.62027,
+          0.35291,
+          0.07313,
+          0.48466,
+          0.14931,
+          0.27568,
+          0.36784,
+          0.43575
+        ],
+        "draw_margin_kwh": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "hours_to_disinfect_from_normal": [
+          0.322,
+          0.567,
+          2.735,
+          0.413,
+          1.34,
+          0.725,
+          0.544,
+          0.459
+        ],
+        "unsourced_parameters": [
+          "heat_source_kw",
+          "t_cold_c",
+          "t_rated_c",
+          "t_normal_c",
+          "t_legionella_c",
+          "cop_legionella",
+          "element_efficiency",
+          "t_heat_pump_max_c"
+        ],
+        "provenance": {
+          "capacity_kwh": "schema citylearn_schemas/tx_travis_8b/schema.json, dhw_storage.capacity",
+          "loss_coefficient": "schema citylearn_schemas/tx_travis_8b/schema.json, dhw_storage"
+        }
+      },
+      "cycle_enforced": true,
+      "sweep": "sizing",
+      "sizing_multiplier": 2.0,
+      "reserve_quantile": 0.5,
+      "heat_source_kw": [
+        4.2072,
+        2.5998,
+        0.6183,
+        4.9842,
+        1.0208,
+        3.154,
+        4.1048,
+        4.9614
+      ],
+      "draw_margin_kwh": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "service": {
+        "unmet_kwh": 0.0,
+        "demand_kwh": 718.213843178004,
+        "unmet_share_of_demand": 0.0,
+        "unmet_draws": 0,
+        "draws": 923,
+        "unmet_share_of_draws": 0.0,
+        "heat_kwh": 844.1876595957549,
+        "electricity_kwh": 446.8485723684846,
+        "spill_kwh": 0.0035941194541315724,
+        "steps": 336
+      },
+      "cycle": {
+        "cycles_completed": [
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0
+        ],
+        "missed_windows": [
+          2,
+          2,
+          2,
+          1,
+          2,
+          2,
+          2,
+          2
+        ],
+        "steps_since_cycle": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "soc_legionella": 1.0,
+        "period_steps": 168.0
+      },
+      "spec": {
+        "capacity_kwh": [
+          6.7571,
+          7.2827,
+          7.5896,
+          10.1601,
+          6.5602,
+          11.175,
+          10.9894,
+          11.2002
+        ],
+        "heat_source_kw": [
+          2.1036,
+          1.2999,
+          0.3091,
+          2.4921,
+          0.5104,
+          1.577,
+          2.0524,
+          2.4807
+        ],
+        "t_cold_c": 10.0,
+        "t_rated_c": 60.0,
+        "t_normal_c": 50.0,
+        "t_legionella_c": 60.0,
+        "soc_normal": 0.8,
+        "soc_legionella": 1.0,
+        "soc_heat_pump_max": 0.9,
+        "cop_legionella": 2.5,
+        "element_efficiency": 1.0,
+        "period_hours": 168.0,
+        "rate_soc_per_step": [
+          0.31132,
+          0.1785,
+          0.04073,
+          0.24528,
+          0.0778,
+          0.14112,
+          0.18676,
+          0.22149
+        ],
+        "net_rate_soc_per_step": [
+          0.30895,
+          0.17441,
+          0.0324,
+          0.23937,
+          0.07151,
+          0.13456,
+          0.18108,
+          0.21427
+        ],
+        "draw_margin_kwh": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "hours_to_disinfect_from_normal": [
+          0.647,
+          1.147,
+          6.173,
+          0.836,
+          2.797,
+          1.486,
+          1.104,
+          0.933
+        ],
+        "unsourced_parameters": [
+          "heat_source_kw",
+          "t_cold_c",
+          "t_rated_c",
+          "t_normal_c",
+          "t_legionella_c",
+          "cop_legionella",
+          "element_efficiency",
+          "t_heat_pump_max_c"
+        ],
+        "provenance": {
+          "capacity_kwh": "schema citylearn_schemas/tx_travis_8b/schema.json, dhw_storage.capacity",
+          "loss_coefficient": "schema citylearn_schemas/tx_travis_8b/schema.json, dhw_storage"
+        }
+      },
+      "cycle_enforced": true,
+      "sweep": "reserve",
+      "sizing_multiplier": 1.0,
+      "reserve_quantile": 0.5,
+      "heat_source_kw": [
+        2.1036,
+        1.2999,
+        0.3091,
+        2.4921,
+        0.5104,
+        1.577,
+        2.0524,
+        2.4807
+      ],
+      "draw_margin_kwh": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "service": {
+        "unmet_kwh": 0.0,
+        "demand_kwh": 718.213843178004,
+        "unmet_share_of_demand": 0.0,
+        "unmet_draws": 0,
+        "draws": 923,
+        "unmet_share_of_draws": 0.0,
+        "heat_kwh": 849.2371138073586,
+        "electricity_kwh": 458.01361275872614,
+        "spill_kwh": 3.4954717684328225,
+        "steps": 336
+      },
+      "cycle": {
+        "cycles_completed": [
+          2,
+          1,
+          0,
+          2,
+          1,
+          2,
+          1,
+          1
+        ],
+        "missed_windows": [
+          0,
+          1,
+          2,
+          0,
+          1,
+          0,
+          1,
+          1
+        ],
+        "steps_since_cycle": [
+          2.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          2.0,
+          0.0,
+          0.0
+        ],
+        "soc_legionella": 1.0,
+        "period_steps": 168.0
+      },
+      "spec": {
+        "capacity_kwh": [
+          6.7571,
+          7.2827,
+          7.5896,
+          10.1601,
+          6.5602,
+          11.175,
+          10.9894,
+          11.2002
+        ],
+        "heat_source_kw": [
+          2.1036,
+          1.2999,
+          0.3091,
+          2.4921,
+          0.5104,
+          1.577,
+          2.0524,
+          2.4807
+        ],
+        "t_cold_c": 10.0,
+        "t_rated_c": 60.0,
+        "t_normal_c": 50.0,
+        "t_legionella_c": 60.0,
+        "soc_normal": 0.8,
+        "soc_legionella": 1.0,
+        "soc_heat_pump_max": 0.9,
+        "cop_legionella": 2.5,
+        "element_efficiency": 1.0,
+        "period_hours": 168.0,
+        "rate_soc_per_step": [
+          0.31132,
+          0.1785,
+          0.04073,
+          0.24528,
+          0.0778,
+          0.14112,
+          0.18676,
+          0.22149
+        ],
+        "net_rate_soc_per_step": [
+          0.13404,
+          0.07759,
+          0.0324,
+          0.12001,
+          0.03417,
+          0.05323,
+          0.08109,
+          0.09724
+        ],
+        "draw_margin_kwh": [
+          1.1819,
+          0.7051,
+          0.0,
+          1.2128,
+          0.2449,
+          0.9089,
+          1.0989,
+          1.3108
+        ],
+        "hours_to_disinfect_from_normal": [
+          1.492,
+          2.578,
+          6.173,
+          1.667,
+          5.853,
+          3.757,
+          2.467,
+          2.057
+        ],
+        "unsourced_parameters": [
+          "heat_source_kw",
+          "t_cold_c",
+          "t_rated_c",
+          "t_normal_c",
+          "t_legionella_c",
+          "cop_legionella",
+          "element_efficiency",
+          "t_heat_pump_max_c",
+          "draw_margin_kwh"
+        ],
+        "provenance": {
+          "capacity_kwh": "schema citylearn_schemas/tx_travis_8b/schema.json, dhw_storage.capacity",
+          "loss_coefficient": "schema citylearn_schemas/tx_travis_8b/schema.json, dhw_storage"
+        }
+      },
+      "cycle_enforced": true,
+      "sweep": "reserve",
+      "sizing_multiplier": 1.0,
+      "reserve_quantile": 0.9,
+      "heat_source_kw": [
+        2.1036,
+        1.2999,
+        0.3091,
+        2.4921,
+        0.5104,
+        1.577,
+        2.0524,
+        2.4807
+      ],
+      "draw_margin_kwh": [
+        1.1819,
+        0.7051,
+        0.0,
+        1.2128,
+        0.2449,
+        0.9089,
+        1.0989,
+        1.3108
+      ]
+    },
+    {
+      "sweep": "reserve",
+      "sizing_multiplier": 1.0,
+      "reserve_quantile": 1.0,
+      "cycle_enforced": true,
+      "refused": "draw_margin_kwh is at or above the source's output per step, so the reserved draw alone consumes everything the source can deliver and the cycle can never progress. Either the source is undersized for this draw or the reserve is wrong.",
+      "service": {
+        "unmet_kwh": NaN,
+        "electricity_kwh": NaN
+      },
+      "cycle": {
+        "cycles_completed": [],
+        "missed_windows": []
+      }
+    }
+  ]
+}

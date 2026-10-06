@@ -177,9 +177,36 @@ Each row is one constructor call. Nothing in the table is a separate enforcement
 |---|---|---|---|---|---|
 | Electric vehicle | traction battery | charger `p_max * eta_c / capacity`, derated | `required_soc_departure` from the observation | departure hour | `EVFleetModel` |
 | Hot-water tank | tank thermal store | heater `nominal_power * efficiency / capacity` | forecast draw over the next `horizon` steps | now (every step) | `TankModel` |
-| Legionella cycle | the same tank | the same heater, limited to `P_hp` | `soc_legionella` (60 degC) | end of the 7-day window | `TankModel` |
+| Legionella cycle | a `ShadowTank` over the same store | `P_hp`, less standing loss and `draw_margin_kwh` | `soc_legionella` = `(T_legionella - T_cold)/(T_rated - T_cold)` | end of the `period_hours` window, recurring | `ShadowTank` |
 | House battery | electrical storage | `nominal_power * dt / capacity` | — (`active` false) | — | `BatteryModel` |
 | *(gated off on CityLearn)* building envelope | zone thermal mass | `temperature_gain_k(phi_max_w) / SPAN_K` | comfort band edge | now, when occupied | `RCThermalModel` |
+
+### A limitation of the deadline, found by instantiating the fourth load
+
+`DeadlineStorageBarrier` starts forcing when `steps_to_deadline` falls to
+`steps_needed = ceil(gap / rate)`. That is a **just-in-time schedule with no
+recourse**: it commands the fewest steps that would suffice if nothing else happened.
+Three of the four loads tolerate it. The hot-water store does not, because — unlike a
+vehicle, which is not driven while plugged in — it is *drawn from while it is being
+charged*, and the draw is bursty.
+
+Measured by `experiments/legionella_demo.py` over 336 steps × 8 buildings (16
+building-windows) on the real hot-water series:
+
+| source size | draw reserve | cycles completed | windows missed |
+|---|---|---|---|
+| sizing rule | median draw (= 0.0 kWh on this data) | 1 / 16 | 15 |
+| sizing rule | 90th percentile of own draw | **10 / 16** | 6 |
+| sizing rule | maximum draw | refused: reserve ≥ source output per step | — |
+| 2 × sizing rule | median draw | 0 / 16 | 16 |
+
+A **larger source completes fewer cycles**, which is not a bug: it raises `rate`, so
+`steps_needed` falls to 1 for six of eight buildings, and the whole cycle must then
+succeed inside one hour. The median hourly draw is 0.0 kWh and the maximum is 3.1–6.3
+kWh, so a median reserve is no reserve. The lever that works is the reserve, not the
+source. Closing the gap properly needs a forecast of the draw during the forced hours;
+`draw_margin_kwh` is the declared stand-in and defaults to zero, which guarantees the
+deadline only against a zero draw.
 
 The envelope row is in the family and is **off by default**, because CityLearn's
 learned temperature model drops a house 4–13 degC in one hour under a −0.25 cooling
@@ -244,6 +271,9 @@ one.
 | The cap margin covers 95% of recent one-step forecast errors | **measured** on the rollout, by construction of the quantile |
 | `rate` for the EV barrier is conservative by `rate_derate = 0.85` | **assumption**, chosen not fitted |
 | `soc_cap = 0.95` for the tank, `margin = 0.05` | **assumption**, chosen not fitted |
-| Heat-pump source power `P_hp`, tank set point, Legionella set point, cold inlet | **unsourced** — parameters with no default; see `stems/legionella.py` |
-| CoP at a 60 degC sink | **unsourced** — the CoP model extrapolates there and is not validated |
+| Heat-pump source power `P_hp`, `T_normal`, `T_legionella`, `T_cold`, `T_rated`, `T_hp,max` | **unsourced** — required arguments with no default; `LegionellaSpec.unsourced` lists them at runtime |
+| `cop_legionella`, the CoP at the disinfection sink | **unsourced**, and the step at the heat-pump ceiling is a modelling choice: a real unit's CoP falls continuously with sink temperature |
+| `soc` is linear in store temperature | **assumption**: a fully mixed tank. A real cylinder stratifies, so the energy to disinfect the whole volume is understated whenever a draw has left a cold bottom layer |
+| Unmet hot water is zero at the design note's sizing rule on this schema | **measured**, `experiments/legionella_demo.py`; it appears (4.17 kWh) only at a quarter of the rule |
+| A just-in-time deadline does not survive a bursty disturbance | **measured**, same script; 1 of 16 windows met with a median reserve, 10 of 16 with a 90th-percentile reserve |
 | A weekly Legionella cycle has not previously been posed as an RL deadline constraint | **plausible, not established**; see `CHANGELOG.md` and §5 of `stems/legionella.py` |

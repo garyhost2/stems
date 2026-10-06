@@ -1942,3 +1942,116 @@ binding sim-to-real risk here, not the interface.
 Plus `tests/test_replay_env.py`, 13 cases: protocol conformance for both the adapter
 and a plant-less site, the canonical observation layout, a shield running on logged
 data with no CityLearn import, and seven refusals.
+
+## Step 4 — The Legionella cycle as the fourth instantiation
+
+**What.** `stems/legionella.py`: `LegionellaSpec` (every parameter, with provenance),
+`ShadowTank` (the power-limited store), `LegionellaCycleBarrier` (a
+`DeadlineStorageBarrier` with a recurring window) and `LegionellaStack` (the three
+assembled into a `FlexibleLoad`). Plus `experiments/legionella_demo.py` and
+`tests/test_legionella.py` (26 cases).
+
+No new enforcement path was added. The cycle is the same object as the vehicle
+deadline with a different requirement function: the required level is a temperature,
+the deadline recurs, and the window resets when the level is *reached* rather than
+when a vehicle leaves. `tests/test_legionella.py::
+test_the_cycle_joins_the_same_portfolio_as_the_other_loads` runs it through the same
+`FlexibilityPortfolio` as a house battery and asserts it is enforced there.
+
+**Why the power-limited source came with it.** CityLearn's hot-water device serves
+every draw in the hour it occurs and is sized so it always can, so an empty tank costs
+nothing and the readiness state of charge is a proxy with no physical consequence.
+`ShadowTank` re-books the same energy against a source limited to `P_hp`, which makes
+**unmet hot water** a real service failure. It is driven *alongside* the simulator, not
+inside `STEMSEnvironment.step`: putting it inside would change the energy accounting of
+every existing run, which is an experiment-phase decision with a before/after burden.
+
+### 4.1 Not one unsourced number was invented
+
+The design note's three open questions — realistic `P_hp`, the tank temperatures, and
+the coefficient of performance at a 60 degC sink — have no sourced answers in this
+repository. **No field of `LegionellaSpec` covering them has a default**, which
+`tests/test_legionella.py::test_the_spec_has_no_default_for_any_open_question` enforces
+by reflection over the dataclass, so a default cannot be added later without the test
+failing. `LegionellaSpec.unsourced` lists at runtime which parameters still carry no
+provenance, and `FlexibleLoad.describe()` carries that list into the load's own
+description so a run record cannot lose it.
+
+The single defaulted interval is `period_hours = 168`. The design note states the rule
+as "once a week ... in new units the interval is a user setting, 7–10 days", so 168 h
+is the shortest of the stated range and therefore the conservative choice.
+
+Two assumptions are stated rather than hidden: `soc` is linear in store temperature
+(a **fully mixed** tank — a real cylinder stratifies, so the energy needed to
+disinfect the whole volume is understated when a draw has left a cold bottom layer),
+and the coefficient of performance *steps* at the heat pump's temperature ceiling
+rather than falling continuously with sink temperature. The step is the coarsest model
+that distinguishes the design note's two unit generations.
+
+### 4.2 Instantiating the load found a limitation of the abstraction
+
+`DeadlineStorageBarrier` forces when `steps_to_deadline` falls to
+`steps_needed = ceil(gap / rate)` — a **just-in-time schedule with no recourse**. Three
+of the four loads tolerate that. The hot-water store does not, because unlike a vehicle
+(which is not driven while plugged in) it is drawn from *while it is being charged*.
+
+`experiments/legionella_demo.py`, 336 steps × 8 buildings (16 building-windows), the
+schema's own hot-water series, a set-point thermostat and no policy:
+
+| source size | draw reserve | cycles completed | windows missed | unmet kWh |
+|---|---|---|---|---|
+| 0.25 × sizing rule | median draw | 0 / 16 | 16 | 4.173 |
+| 0.5 × | median draw | 0 / 16 | 16 | 0.000 |
+| 1.0 × | median draw | 1 / 16 | 15 | 0.000 |
+| 2.0 × | median draw | **0 / 16** | 16 | 0.000 |
+| 1.0 × | 90th percentile of own draw | **10 / 16** | 6 | 0.000 |
+| 1.0 × | maximum draw | refused by `LegionellaSpec` | — | — |
+
+A **larger source completing fewer cycles** looks like a bug, so the mechanism was
+traced before being reported. It is not a bug. A larger source raises `rate`, so
+`steps_needed` falls — to **1** for six of the eight buildings at twice the sizing
+rule — and the entire cycle must then succeed inside one hour. Measured on this
+schema, the **median hourly hot-water draw is 0.0 kWh** (draws are bursty) while the
+maximum is 3.122 to 6.302 kWh per building, so a median-quantile reserve is no reserve
+at all and one burst in the single forced hour defeats the deadline. The lever is the
+reserve, not the source: 1 → 10 of 16 at unchanged source size.
+
+`draw_margin_kwh` is the declared reserve, **zero by default**, and
+`LegionellaCycleBarrier.current_rate` deducts it and the standing loss from the rate.
+Zero is the honest default: nothing in this repository forecasts hot-water demand
+during the disinfection hours, and zero says plainly that the deadline is guaranteed
+only against a zero draw. Both sides are pinned —
+`test_the_barrier_drives_the_cycle_to_completion_over_a_week` with a reserve, and
+`test_without_a_reserve_the_concurrent_draw_can_make_the_cycle_miss` without one, on
+the identical draw sequence. Reserving the *maximum* draw is refused at construction,
+because for at least one building it exceeds everything the source delivers in a step
+and the constraint would be unsatisfiable by construction.
+
+### 4.3 Two negative results about this testbed
+
+* **Unmet hot water is zero at the design note's sizing rule**, and at every multiple
+  above it. It appears only at a quarter of the rule (4.173 kWh over 336 steps × 8
+  buildings). With the schema's own tank capacities the power limit does not bind, so
+  the service-failure KPI the design note wants exists, is implemented, and measures
+  zero here. A result that needs it to bind will need a sourced `P_hp` that is smaller
+  than this rule, or a different building stock.
+* **A just-in-time deadline does not guarantee a deadline under disturbance.** That is
+  a property of the framework, not of a controller, and no controller was run.
+
+### 4.4 The novelty claim, worded as the evidence supports
+
+`docs/LITERATURE.md` was read, not edited. Its verdict is adopted verbatim in
+`stems/legionella.py`:
+
+* [engelbrecht2021optimal] is **confirmed** — a field study of 77 water heaters,
+  median savings "6.3% for temperature-matching, 21.9% for energy-matching and 16.2%
+  for energy-matching with Legionella prevention". But its method is **A\* search
+  optimal control, not reinforcement learning**, and the abstract supports neither
+  "daily" nor "as a temperature constraint". Both qualifiers are dropped.
+* "Reyes Premer et al. (2025) use a soft penalty" is **struck**. That paper is model
+  predictive control for a 120 V heat-pump water heater and does not mention
+  Legionella at all.
+* The claim is therefore written as: *no reinforcement-learning treatment of a weekly
+  Legionella cycle as a deadline constraint was found. That is an absence of evidence
+  from one search, not a proven absence.* **Plausible and not established.** The module
+  docstring says exactly this, so the wording travels with the code.
