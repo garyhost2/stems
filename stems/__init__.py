@@ -1,5 +1,10 @@
 from stems.config import STEMSConfig
+from stems.deadline import DeadlineRequirement, DeadlineStorageBarrier
 from stems.environment import STEMSEnvironment
+from stems.flexibility import FlexibilityPortfolio, FlexibleLoad
+from stems.protocols import (Environment, EVProvider, PlantModel, PlantProvider,
+                             missing_capabilities)
+from stems.replay import CSVReplayEnvironment
 from stems.graph import BuildingGraph
 from stems.encoder import STEncoder
 from stems.cbf import CBFShield
@@ -38,9 +43,29 @@ CONTROLLERS_REACHABLE_FROM_ARMS = {
     "MAPPOCentralisedCritic": ("mappo-cc",),
 }
 
+#: The framework's public interface: the object ``docs/FRAMEWORK.md`` defines, the
+#: protocols a non-CityLearn adapter implements, and nothing else. Declared as a set so
+#: that ``tests/test_controller_reachability.py`` can exclude it from the
+#: "every exported name is a controller with an arm" rule without a second hand-kept
+#: list going stale every time the framework gains a name.
+FRAMEWORK_EXPORTS = {
+    "DeadlineRequirement",
+    "DeadlineStorageBarrier",
+    "FlexibleLoad",
+    "FlexibilityPortfolio",
+    "PlantModel",
+    "Environment",
+    "PlantProvider",
+    "EVProvider",
+    "CSVReplayEnvironment",
+    "missing_capabilities",
+}
+
 __all__ = [
     "STEMSConfig",
     "STEMSEnvironment",
+    *sorted(FRAMEWORK_EXPORTS),
+    "FRAMEWORK_EXPORTS",
     "BuildingGraph",
     "STEncoder",
     "CBFShield",

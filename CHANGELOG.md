@@ -1784,3 +1784,97 @@ Three findings came out of measuring rather than quoting.
 
 **Not claimed.** `docs/FRAMEWORK.md` §6 forward-references `stems/protocols.py`,
 `stems/replay.py` and `stems/legionella.py`, which land in steps 3 and 4 of this track.
+
+## Step 2 — The abstraction made explicit in code
+
+**What.** Three new modules and one deleted code path.
+
+* `stems/protocols.py` — `PlantModel`, `Environment`, `PlantProvider`, `EVProvider`,
+  plus `missing_capabilities(adapter)`, which names the attribute an adapter is missing
+  rather than only answering yes or no.
+* `stems/flexibility.py` — `FlexibleLoad` (one store, its rate limit, its required
+  level, its deadline) and `FlexibilityPortfolio` (a set of them under one cap).
+* `stems/deadline.py` — `DeadlineStorageBarrier` gained an optional `plant=` and the
+  properties `exact_projection` / `plant_inputs`. **Default `None`, i.e. the historical
+  linear path, unchanged.**
+* `stems/cbf.py` — `_apply_shared_power_allocation` (42 lines) deleted;
+  `_apply_deadline_barriers` and `feasibility_report` now delegate to
+  `CBFShield.portfolio`, a `FlexibilityPortfolio` built per call from the public
+  `deadline_barriers` list. Per call, not cached: `experiments/controllers.py` and
+  several tests append to that list after construction, and a cached portfolio would
+  enforce a stale set — the failure mode a safety layer least wants.
+* `stems/__init__.py` — exports the framework and declares `FRAMEWORK_EXPORTS`.
+
+**Why.** The four loads were four construction sites: `EVReadinessBarrier` built in
+`experiments/controllers.py`, `DHWReadinessBarrier` in `stems/thermal.py`,
+`ThermalComfortBarrier` in `stems/comfort.py`, and the house battery not a load at all
+— a pair of state-of-charge bounds inside `CBFShield.project` and a shedding branch
+inside `FleetShield`. The knowledge that *a set of deadline loads contends for one cap*
+lived in a private method of the battery shield, so a fifth load could not join the set
+without editing that shield. It now lives in the portfolio, which is why the Legionella
+cycle (step 4) joins without `stems/cbf.py` changing again.
+
+The house battery is the framework's *degenerate* member, not an exception to it: a
+band and no deadline (`barrier=None`, `active` nowhere). `FlexibleLoad` refuses a load
+with neither face, because a load that constrains nothing is not a load.
+
+### 2.1 Behaviour did not change, and here is the number
+
+`experiments/refactor_kpi_check.py` (new) runs three deterministic rollouts on the real
+electric-vehicle schema — `idle+calibrated` (the shield alone), `rbc+calibrated` (the
+rule plus the LP cap shield) and `rl+calibrated` (the untrained agent, every projection
+live) — for 167 steps at seed 0, and writes every key-performance indicator the
+repository computes plus the per-column sums of the executed action stream.
+
+Determinism was established first, because a zero difference across a refactor means
+nothing if the rollout is not reproducible: two runs at the same commit,
+`before.json` against `before_repeat.json`, gave **0 differing fields, largest absolute
+difference 0.000e+00** over 167 steps × 3 arms.
+
+Across the refactor, `before.json` against `after.json`:
+
+> **0 differing field(s), largest absolute difference 0.000e+00.**
+
+Bit for bit, including `barrier_intervention_rate` (0.660180 / 0.205838 / 0.974551 for
+the three arms), `avg_daily_peak` (55.143626 / 55.999106 / 55.375294 kW) and the
+executed-action column sums. The comparison is exact (`--tol 0`), not approximate.
+
+### 2.2 Disputed: "BatteryModel, TankModel and EVFleetModel already provide three
+exact projections" is true of the plant models and **not** of the barrier
+
+The brief says each instantiation needs a plant model with an exact projection and that
+three already exist. The three exact inverses exist and are measured in step 1. They
+are **not what the deadline barrier uses.** `DeadlineStorageBarrier.project` computes
+its forced action from `action_for_soc_gain`, the linear map `gap / rate *
+action_bound`; `EVReadinessBarrier` derates `rate` by `rate_derate = 0.85` precisely
+because that map is not the plant. The exact inverses are called by `stems/fleet.py`
+(the cap LP, via `BatteryModel._pow_x/_pow_y` as piecewise-linear constraints and
+`action_for_draw` to realise a granted kW) and by `stems/mpc.py`.
+
+So the instruction describes a property the framework *should* have and does not yet.
+What landed is the seam, not the switch: `DeadlineStorageBarrier(plant=...)` makes the
+forced action `plant.action_for_soc(soc, soc + gap)`, and `exact_projection` reports
+which path a barrier is on. It is **off in every shipped barrier**, asserted by
+`tests/test_flexibility.py::test_switching_the_plant_in_is_off_in_every_shipped_barrier`.
+
+Turning it on would change trajectories — the linear map and the exact inverse disagree
+whenever `rate` over- or under-states the plant, which is always — and this step's
+contract was that behaviour must not change. Switching it on is a measured comparison
+(does exactness reduce the deadline-miss rate, and at what cost in forced energy?), and
+that belongs in the experiment phase, not in a refactor.
+
+### 2.3 A test was edited, recorded under the test-editing rule
+
+`tests/test_controller_reachability.py::_exported_controllers` subtracted a hand-kept
+`NOT_CONTROLLERS` set from `stems.__all__` and asserted the remainder are controllers
+with an arm. Eight framework names are now exported and none is a controller. Rather
+than grow the hard-coded set, the helper now also subtracts `stems.FRAMEWORK_EXPORTS`,
+which the package declares itself — so a future framework export does not require
+editing a test. The assertion it protects (every exported *controller* is reachable
+from `ARMS`) is unchanged and still fails if a controller is exported without an arm.
+
+**Evidence.** `tests/test_flexibility.py`, 20 new cases: the two faces, the refusals
+(`a load with neither face`, `a barrier projecting a different column`, `duplicate
+names`), the exact-inverse seam and its default-off state, joint infeasibility that no
+device sees alone, and the shield-delegation equivalence across all three coordination
+rules including the append-after-construction case.

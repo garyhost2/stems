@@ -42,6 +42,7 @@ class DeadlineStorageBarrier:
         margin: float = 0.0,
         soc_cap: float = 0.95,
         name: str = "storage",
+        plant: Optional[object] = None,
     ) -> None:
         f = lambda x: np.asarray(x, dtype=np.float32).reshape(-1)
         self.rate = np.maximum(f(rate), 1e-6)
@@ -54,6 +55,44 @@ class DeadlineStorageBarrier:
         self.margin = float(margin)
         self.soc_cap = float(soc_cap)
         self.name = str(name)
+        self.plant = plant
+
+    @property
+    def exact_projection(self) -> bool:
+        """Whether the forced action comes from the plant's own inverse.
+
+        ``False`` -- the default and the historical behaviour -- means the forced action
+        is ``action_for_soc_gain``, the *linear* map ``gap / rate * action_bound``. That
+        is not the plant's inverse: the stores this framework covers all saturate as
+        they fill, so a linear rate overstates what a step of charging achieves, and the
+        subclasses compensate by derating ``rate`` (``EVReadinessBarrier`` uses
+        ``rate_derate = 0.85``). Conservative, and not exact.
+
+        ``True`` means ``plant.action_for_soc`` is inverted at every step, so the forced
+        action is the smallest command that actually reaches the required level under
+        the simulator's own dynamics. See ``experiments/plant_projection_error.py`` for
+        what "exact" is worth on each plant, and ``docs/FRAMEWORK.md`` §3 for why this
+        is off by default: switching it on changes trajectories, so it is a measured
+        comparison and not a refactor.
+        """
+        return self.plant is not None
+
+    def plant_inputs(self, obs_list: List[np.ndarray]) -> Dict[str, np.ndarray]:
+        """Exogenous arguments this load's plant needs, read off the observation.
+
+        Empty for a battery or a charger; the hot-water tank needs ``demand``, the draw
+        in kWh for the step, because its reachable set depends on it.
+        """
+        return {}
+
+    def _forced_action(self, u: Dict[str, np.ndarray],
+                       obs_list: List[np.ndarray]) -> np.ndarray:
+        if self.plant is None:
+            return self.action_for_soc_gain(u["gap"], u["rate"])
+        soc = np.asarray(u["soc"], dtype=np.float64)
+        target = np.minimum(soc + np.asarray(u["gap"], dtype=np.float64), 1.0)
+        a = self.plant.action_for_soc(soc, target, **self.plant_inputs(obs_list))
+        return np.clip(np.asarray(a, dtype=np.float32), 0.0, self.action_bound)
 
 
     def current_rate(self, obs_list: List[np.ndarray]) -> np.ndarray:
@@ -105,7 +144,7 @@ class DeadlineStorageBarrier:
         u = self.urgency(obs_list)
         must_charge = (u["slack"] <= 0.0) & u["active"] & (u["gap"] > 0.0)
         a_min = np.where(must_charge,
-                         np.minimum(self.action_for_soc_gain(u["gap"], u["rate"]),
+                         np.minimum(self._forced_action(u, obs_list),
                                     self.action_bound),
                          0.0)
         actions[:, self.action_index] = np.maximum(

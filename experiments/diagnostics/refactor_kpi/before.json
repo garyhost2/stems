@@ -1,0 +1,143 @@
+[
+  {
+    "arm": "idle+calibrated",
+    "executed_action_abs_sum": [
+      0.0,
+      5.548360467,
+      173.544981366,
+      85.5599945188
+    ],
+    "executed_action_sum": [
+      0.0,
+      5.548360467,
+      162.7667849436,
+      85.5599945188
+    ],
+    "kpis": {
+      "avg_daily_peak": 55.1436260768,
+      "avoidable_violation_rate": 0.0,
+      "barrier_intervention_magnitude": 0.0170487184,
+      "barrier_intervention_rate": 0.6601796407,
+      "battery_equivalent_full_cycles": 0.0505008176,
+      "cap_exceedance_kwh": 0.0,
+      "cost": 937.9949951172,
+      "cost_cv_across_buildings": 0.3114173116,
+      "discomfort_degree_hours": 3.0048060417,
+      "discomfort_rate": 0.0213464696,
+      "discomfort_rate_worst_building": 0.049382716,
+      "electricity_consumption": 3455.9089355469,
+      "emission": 636.9548339844,
+      "ev_departures": 33.0,
+      "ev_energy_shortfall_kwh": 0.0,
+      "ev_missed_departure_rate": 0.0,
+      "ev_missed_departures": 0.0,
+      "grid_violation_rate": 0.0,
+      "hvac_on_transitions_per_building_day": 1.2754491018,
+      "load_factor": 0.2691840627,
+      "peak_import_kw": 76.8770141602,
+      "power_violation_rate": 0.0,
+      "pv_self_consumption": 0.6304136753,
+      "ramping_rate": 7.3845148087,
+      "safety_violation_rate": 0.0,
+      "self_sufficiency": 0.1877840021,
+      "soc_violation_rate": 0.0,
+      "unavoidable_violation_rate": 0.0
+    },
+    "seed": 0,
+    "steps": 167
+  },
+  {
+    "arm": "rbc+calibrated",
+    "executed_action_abs_sum": [
+      240.7999939919,
+      194.8945934176,
+      173.544981366,
+      130.0
+    ],
+    "executed_action_sum": [
+      -39.2000060081,
+      31.4354255795,
+      162.7667849436,
+      130.0
+    ],
+    "kpis": {
+      "avg_daily_peak": 55.9991062709,
+      "avoidable_violation_rate": 0.0,
+      "barrier_intervention_magnitude": 0.0129203564,
+      "barrier_intervention_rate": 0.2058383234,
+      "battery_equivalent_full_cycles": 3.6589534283,
+      "cap_exceedance_kwh": 0.0,
+      "cost": 1117.3254394531,
+      "cost_cv_across_buildings": 0.2790145042,
+      "discomfort_degree_hours": 3.0048060417,
+      "discomfort_rate": 0.0213464696,
+      "discomfort_rate_worst_building": 0.049382716,
+      "electricity_consumption": 3835.3706054688,
+      "emission": 757.4618530273,
+      "ev_departures": 33.0,
+      "ev_energy_shortfall_kwh": 0.0,
+      "ev_missed_departure_rate": 0.0,
+      "ev_missed_departures": 0.0,
+      "grid_violation_rate": 0.0,
+      "hvac_on_transitions_per_building_day": 1.2754491018,
+      "load_factor": 0.2825645665,
+      "peak_import_kw": 81.2780303955,
+      "power_violation_rate": 0.0,
+      "pv_self_consumption": 0.7611022289,
+      "ramping_rate": 9.633140564,
+      "safety_violation_rate": 0.0,
+      "self_sufficiency": 0.2009667585,
+      "soc_violation_rate": 0.0,
+      "unavoidable_violation_rate": 0.0
+    },
+    "seed": 0,
+    "steps": 167
+  },
+  {
+    "arm": "rl+calibrated",
+    "executed_action_abs_sum": [
+      65.7389663402,
+      22.5756932162,
+      171.9346237034,
+      76.9169028997
+    ],
+    "executed_action_sum": [
+      43.4493883327,
+      21.1553092776,
+      161.0555490199,
+      76.9169028997
+    ],
+    "kpis": {
+      "avg_daily_peak": 55.3752942766,
+      "avoidable_violation_rate": 0.0,
+      "barrier_intervention_magnitude": 0.0296643302,
+      "barrier_intervention_rate": 0.9745508982,
+      "battery_equivalent_full_cycles": 0.2952946723,
+      "cap_exceedance_kwh": 0.0,
+      "cost": 1005.7106323242,
+      "cost_cv_across_buildings": 0.2997913102,
+      "discomfort_degree_hours": 2.9858458042,
+      "discomfort_rate": 0.0197044335,
+      "discomfort_rate_worst_building": 0.0487804878,
+      "electricity_consumption": 3700.1076660156,
+      "emission": 685.8036499023,
+      "ev_departures": 33.0,
+      "ev_energy_shortfall_kwh": 0.0,
+      "ev_missed_departure_rate": 0.0,
+      "ev_missed_departures": 0.0,
+      "grid_violation_rate": 0.0,
+      "hvac_on_transitions_per_building_day": 1.2574850299,
+      "load_factor": 0.288048098,
+      "peak_import_kw": 76.9188690186,
+      "power_violation_rate": 0.0,
+      "pv_self_consumption": 0.6539516392,
+      "ramping_rate": 7.2163047791,
+      "safety_violation_rate": 0.0,
+      "self_sufficiency": 0.1830089226,
+      "soc_violation_rate": 0.0,
+      "unavoidable_violation_rate": 0.0
+    },
+    "seed": 0,
+    "steps": 167
+  }
+]

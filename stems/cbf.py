@@ -6,8 +6,8 @@ import numpy as np
 
 from stems.battery import BatteryModel
 from stems.config import CBFConfig, SafetyConfig
-from stems.deadline import (DeadlineStorageBarrier, coupled_feasibility,
-                            prioritise)
+from stems.deadline import DeadlineStorageBarrier
+from stems.flexibility import FlexibilityPortfolio
 from stems.observations import obs_indices
 from stems.thermal import CoPModel, DHWReadinessBarrier
 
@@ -64,6 +64,23 @@ class CBFShield:
             deadline_barriers or [])
         if dhw_barrier is not None and dhw_barrier not in self.deadline_barriers:
             self.deadline_barriers.insert(0, dhw_barrier)
+
+    @property
+    def portfolio(self) -> FlexibilityPortfolio:
+        """The deadline loads this shield enforces, as the framework object.
+
+        Built per call from ``self.deadline_barriers`` rather than cached, because that
+        list is public and callers append to it after construction
+        (``experiments/controllers.py`` does, and so do several tests). A cached
+        portfolio would silently enforce a stale set, which is the failure mode a
+        safety layer least wants.
+
+        The cap is passed at projection time, not stored here: ``grid_cap()`` depends
+        on the safety configuration's derate, which is also mutable.
+        """
+        return FlexibilityPortfolio.from_barriers(
+            self.deadline_barriers, cap_kw=self.grid_cap(),
+            coordination=self.coordination, net_index=_IDX_NET)
 
 
     def enforced_soc_bounds(self) -> Tuple[np.ndarray, np.ndarray]:
@@ -136,62 +153,20 @@ class CBFShield:
 
     def _apply_deadline_barriers(self, safe: np.ndarray,
                                  states: List[np.ndarray]) -> np.ndarray:
-        for barrier in self.deadline_barriers:
-            safe = barrier.project(safe, states)
-        if self.coordination != "independent":
-            safe = self._apply_shared_power_allocation(safe, states)
-        return safe
+        """Every deadline load, then the shared cap.
 
-    def _apply_shared_power_allocation(self, safe: np.ndarray,
-                                       states: List[np.ndarray]) -> np.ndarray:
-        cap = self.grid_cap()
-        net = np.array([float(s_[_IDX_NET]) for s_ in states], dtype=np.float32)
-        baseline = float(np.maximum(net, 0.0).sum())
-        headroom = max(cap - baseline, 0.0)
-
-        entries = []
-        requested_total = 0.0
-        for barrier in self.deadline_barriers:
-            power = getattr(barrier, "_p_charge", None)
-            if power is None:
-                continue
-            u = barrier.urgency(states)
-            a = np.maximum(safe[:, barrier.action_index], 0.0)
-            kw = a * power
-            for i in range(len(kw)):
-                if kw[i] > 1e-9:
-                    entries.append((float(u["steps_to_deadline"][i]), barrier,
-                                    i, float(kw[i])))
-                    requested_total += float(kw[i])
-
-        if requested_total <= headroom + 1e-9 or requested_total <= 1e-9:
-            return safe
-
-        if self.coordination == "proportional":
-            scale = headroom / requested_total
-            for _, barrier, i, kw in entries:
-                idx = barrier.action_index
-                safe[i, idx] = safe[i, idx] * scale
-            return safe
-
-        entries.sort(key=lambda e: (e[0], -e[3]))
-        budget = headroom
-        for _, barrier, i, kw in entries:
-            grant = min(kw, budget)
-            budget -= grant
-            idx = barrier.action_index
-            safe[i, idx] = safe[i, idx] * (grant / kw) if kw > 1e-9 else 0.0
-        return safe
+        The body of this method moved to
+        ``stems.flexibility.FlexibilityPortfolio.project_deadlines`` and
+        ``.allocate_under_cap``, unchanged: the shield used to be the only place that
+        knew a set of deadline loads contends for one cap, which meant a new load could
+        not join the set without editing the battery shield. Deliberately *not* a
+        change of behaviour -- see CHANGELOG.md, abstraction track step 2, for the
+        before/after key-performance-indicator comparison that checks it.
+        """
+        return self.portfolio.project_deadlines(safe, states, cap_kw=self.grid_cap())
 
     def feasibility_report(self, states: List[np.ndarray]) -> Optional[dict]:
-        if not self.deadline_barriers:
-            return None
-        report = coupled_feasibility(self.deadline_barriers, states,
-                                     power_cap_kw=self.grid_cap())
-        if not report["feasible"]:
-            report["priority"] = prioritise(self.deadline_barriers, states,
-                                            power_cap_kw=self.grid_cap())
-        return report
+        return self.portfolio.feasibility(states, cap_kw=self.grid_cap())
 
 
     def _apply_hvac_power_guard(self, safe: np.ndarray,

@@ -38,7 +38,13 @@ NOT_CONTROLLERS = {
 
 
 def _exported_controllers():
-    return sorted(set(stems.__all__) - NOT_CONTROLLERS)
+    # `stems.FRAMEWORK_EXPORTS` is the flexibility framework's public interface -- the
+    # deadline load, the portfolio, the environment protocols. None of them is a
+    # controller, and unlike NOT_CONTROLLERS the package declares the set itself, so
+    # adding a framework name does not require editing this file. See CHANGELOG.md,
+    # abstraction track step 2.
+    return sorted(set(stems.__all__) - NOT_CONTROLLERS - stems.FRAMEWORK_EXPORTS
+                  - {"FRAMEWORK_EXPORTS"})
 
 
 def test_every_exported_controller_declares_an_arm():
