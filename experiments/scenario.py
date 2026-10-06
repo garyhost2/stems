@@ -20,13 +20,30 @@ def day_window(first_day: int, days: int) -> Tuple[int, int]:
 
 
 YEAR = "year"
+
+#: Train on the first half of the year, evaluate on the second. This is the honest
+#: counterpart to ``YEAR``, which returns the SAME window for both phases and is
+#: therefore in-sample: audit finding A1 records that all 23 records in
+#: results/ws_paper/ have ``train_window == eval_window == [0, 8759]``, so every
+#: learning number there is a training-set score. Any claim about generalisation must
+#: use this split, or the held-out building subsets, or a different weather year.
+#:
+#: The split is by time, never at random, because the state is autocorrelated and a
+#: random split would leak neighbouring hours across the boundary. The two halves are
+#: also seasonally different for Travis County -- the first is winter and spring, the
+#: second summer and autumn -- so this is a deliberately hard split and the gap it
+#: shows is an upper bound on what a same-season split would give.
+YEAR_SPLIT = "year-split"
 YEAR_STEPS = 8760
-SEASONS = sorted(SEASON_FIRST_DAY) + [YEAR]
+SEASONS = sorted(SEASON_FIRST_DAY) + [YEAR, YEAR_SPLIT]
 
 
 def season_windows(season: str, days: int = 28) -> Tuple[Tuple[int, int], Tuple[int, int]]:
     if season == YEAR:
         return (0, YEAR_STEPS - 1), (0, YEAR_STEPS - 1)
+    if season == YEAR_SPLIT:
+        half = YEAR_STEPS // 2
+        return (0, half - 1), (half, YEAR_STEPS - 1)
     if season not in SEASON_FIRST_DAY:
         raise ValueError(f"unknown season {season!r}; choose from {sorted(SEASON_FIRST_DAY)}")
     first = SEASON_FIRST_DAY[season]
@@ -176,7 +193,12 @@ class Scenario:
     @property
     def key(self) -> str:
         subset = "ref" if self.subset_seed is None else f"subset{self.subset_seed}"
-        span = "year-insample" if self.season == YEAR else f"{self.season}{self.days}d"
+        if self.season == YEAR:
+            span = "year-insample"
+        elif self.season == YEAR_SPLIT:
+            span = "year-split"
+        else:
+            span = f"{self.season}{self.days}d"
         key = (f"{_resolve(self.schema).parent.name}__{span}"
                f"__{subset}n{self.n_buildings}"
                f"__cap{self.grid_cap_kw:g}-{self.building_cap_kw:g}")

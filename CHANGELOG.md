@@ -2386,3 +2386,31 @@ directories, 8.5 MB, not reproducible without re-running training.
 
 Full suite after the cap-default change of the previous commit: **654 passed, 1 failed**,
 the one failure being the timing assertion corrected here.
+
+## A train/test split for the year, and the cap default that ablation.py was ignoring
+
+Two changes needed before E1 can run honestly.
+
+`experiments/scenario.py` gains a `year-split` season: train `[0, 4379]`, evaluate
+`[4380, 8759]`. The existing `year` season returns the *same* window for both phases,
+which is audit finding A1 -- all 23 records in `results/ws_paper/` carry
+`train_window == eval_window == [0, 8759]`, so every learning number there is a
+training-set score. The split is by time, never at random, because the state is
+autocorrelated and a random split leaks neighbouring hours across the boundary. The
+two halves are seasonally different for Travis County (winter/spring against
+summer/autumn), so this is a deliberately hard split and the gap it reveals is an
+upper bound on what a same-season split would show. The scenario key becomes
+`...__year-split__...`, which cannot be aggregated with `...__year-insample__...`
+by accident.
+
+`experiments/ablation.py` carried its own `--grid-cap 300.0` and `--building-cap 80.0`
+argparse defaults, independent of the `Scenario` dataclass re-pinned in 505de3a. E1
+would therefore have run under the cap that cannot bind, reinstating the structurally
+zero violation rates that the re-pinning was meant to fix. Both defaults now read from
+`Scenario`, so there is one place to change and it is the documented one.
+
+Three tests added to `tests/test_experiments.py`: the split windows are disjoint,
+adjacent and exhaustive with training strictly first; the two scenario keys differ; and
+the scenario caps are below the measured uncontrolled peaks (41.8822 kW district,
+14.3167 kW worst building), which fails loudly if a cap that cannot bind is ever
+restored.

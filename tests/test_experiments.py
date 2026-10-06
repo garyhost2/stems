@@ -572,3 +572,50 @@ def test_charge_commands_on_a_full_store_are_not_evidence():
     s = ev.summary()
     assert s["battery"]["responds"] is None and s["battery"]["n_charge"] == 0
     assert s["verified"] is not False
+
+
+def test_year_split_trains_and_evaluates_on_disjoint_halves():
+    """Audit A1: the 'year' season returns the SAME window twice, so it is in-sample.
+
+    'year-split' is the honest counterpart. The two windows must be disjoint, adjacent,
+    cover the whole year, and put training strictly before evaluation -- a time split,
+    never a random one, because the state is autocorrelated.
+    """
+    from experiments.scenario import YEAR, YEAR_SPLIT, YEAR_STEPS, season_windows
+
+    insample_train, insample_eval = season_windows(YEAR)
+    assert insample_train == insample_eval == (0, YEAR_STEPS - 1)
+
+    train, evaluation = season_windows(YEAR_SPLIT)
+    assert train == (0, 4379)
+    assert evaluation == (4380, YEAR_STEPS - 1)
+    assert train[1] < evaluation[0], "training must end before evaluation begins"
+    assert evaluation[0] == train[1] + 1, "the halves must be adjacent, with no gap"
+    assert (train[1] - train[0] + 1) + (evaluation[1] - evaluation[0] + 1) == YEAR_STEPS
+    assert set(range(*train)) & set(range(*evaluation)) == set(), "windows overlap"
+
+
+def test_year_split_scenario_key_is_distinguishable_from_the_insample_one():
+    """So a split record can never be aggregated with an in-sample one by accident."""
+    from experiments.scenario import YEAR, YEAR_SPLIT, Scenario
+
+    assert "year-insample" in Scenario(season=YEAR).key
+    assert "year-split" in Scenario(season=YEAR_SPLIT).key
+    assert Scenario(season=YEAR).key != Scenario(season=YEAR_SPLIT).key
+
+
+def test_the_scenario_caps_can_actually_bind():
+    """The uncontrolled district peak is 41.8822 kW; a cap above it is inert.
+
+    Guards against the 300/80 kW defaults coming back, which made every
+    violation-rate column structurally zero.
+    """
+    from experiments.scenario import Scenario
+
+    measured_district_peak_kw = 41.8822
+    measured_worst_building_peak_kw = 14.3167
+    s = Scenario()
+    assert s.grid_cap_kw < measured_district_peak_kw, (
+        f"grid_cap_kw={s.grid_cap_kw} exceeds the measured uncontrolled peak "
+        f"{measured_district_peak_kw} kW, so it can never bind")
+    assert s.building_cap_kw < measured_worst_building_peak_kw

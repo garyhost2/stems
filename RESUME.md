@@ -88,10 +88,42 @@ operating point and is cheaper to settle before the grid runs than after.
 
 ## Next, in order
 
-1. **E1, the gate.** Replace the in-sample grid: train `[0,4379]`, test
-   `[4380,8759]`, 5 seeds, the same arms as `results/ws_paper/`, under the binding
-   cap. About 23 runs, 4-6 h wall on 20 cores. Look at this table before spending
-   compute on anything below — it decides whether the stored numbers survive.
+1. **E1, the gate.** Replace the in-sample grid. 23 runs, 4-6 h wall on 20 cores.
+   Look at this table before spending compute on anything below — it decides whether
+   the stored numbers survive.
+
+   ```bash
+   source scripts/env.sh
+   python -m experiments.ablation \
+       --seasons year-split --subsets ref \
+       --arms idle rbc rbc+calibrated rl rl+basic rl+linear rl+calibrated \
+       --seeds 0 1 2 3 4 --episodes 15 \
+       --workers 10 --out results/e1_split
+   ```
+
+   Add `--dry-run` first to list the 23 records without running them. The arms and
+   `--episodes 15` match `results/ws_paper/` exactly, so the only things that change
+   are the window and the cap, which is what makes the comparison interpretable.
+   `--seasons year-split` gives train `[0,4379]` / test `[4380,8759]`; the caps come
+   from the `Scenario` defaults (33.5 / 11.5 kW) and need no flag. The scenario key
+   written into every record is
+   `tx_travis_8b__year-split__refn8__cap33.5-11.5`, which cannot be confused with
+   the in-sample `...__year-insample__refn8__cap300-80` of the stored grid.
+
+   `--workers 10` not 20: each run pins itself to one torch thread, but CityLearn
+   holds the full year of eight buildings in memory, so 10 keeps headroom. Raise it
+   if memory allows.
+
+   Then read the table:
+
+   ```bash
+   python -m experiments.aggregate results/e1_split
+   ```
+
+   Two things to look at before anything else. Does `rl+calibrated` still report a
+   zero violation rate now the cap binds? And how large is the drop from the
+   in-sample numbers in `results/ws_paper/` — that gap is the generalisation cost
+   that was previously invisible.
 2. **E2** held-out buildings, 5 subsets x 5 seeds, disjoint train/test building
    sets. Each subset must **re-measure its own uncontrolled peak** rather than
    inherit 33.5/11.5 kW.

@@ -72,8 +72,12 @@ def main() -> None:
     ap.add_argument("--days", type=int, default=28,
                     help="length of each training and evaluation window")
     ap.add_argument("--buildings", type=int, default=8)
-    ap.add_argument("--grid-cap", type=float, default=300.0)
-    ap.add_argument("--building-cap", type=float, default=80.0)
+    ap.add_argument("--grid-cap", type=float, default=Scenario.grid_cap_kw,
+                    help="District import cap, kW. Defaults to the Scenario value, "
+                         "which is 80%% of the measured uncontrolled peak. The old "
+                         "300 kW could not bind: 0 of 8759 hours.")
+    ap.add_argument("--building-cap", type=float, default=Scenario.building_cap_kw,
+                    help="Per-building cap, kW. Defaults to the Scenario value.")
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--schema", default=TX_SCHEMA,
                     help="schema to run on; the housing-and-EV schema adds the fleet "
