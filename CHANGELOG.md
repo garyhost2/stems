@@ -779,3 +779,138 @@ test-editing rule: the alternative was to paste twenty-four names that deliberat
 not run into an inventory of arms that do, which would make that test a list of things
 that are not there. The pre-registered names are inventoried by the new file instead,
 and the scoped test still fails the moment an *implemented* arm is added or changed.
+
+---
+
+# Constraints track — branch `methods/constraints`
+
+Audit finding ids refer to `docs/AUDIT_2026-10-06.md` §4C. The starting point was that
+only two constraints are genuinely hard in the running code — the battery
+state-of-charge band and the district import cap — that comfort is a soft reward term,
+that the per-building power cap is Lagrangian-only, that degradation and transformer
+limits do not exist, and that the Lagrangian is vestigial in the arms actually run
+because the exact barrier drives its cost to zero.
+
+**Test floor on entry.** `python -m pytest tests/ -q` in this worktree, before the first
+edit: **404 passed, 15 skipped, 1 warning, 0 failed** (419 collected, 123.76 s). The
+brief states the floor as "419 passing"; 419 is the collected count, and the 15 skips
+are all one cause — the CityLearn EV dataset
+`citylearn_challenge_2022_phase_all_plus_evs` is not present on this machine, so every
+test in `tests/test_env_widening.py` and `tests/test_ev_real.py` that needs it skips
+with `EV dataset unavailable: RuntimeError("Schema ... not found")`. No test fails, and
+nothing in this track touches that code path. The floor carried forward is therefore
+**404 passed / 15 skipped / 0 failed**, and every step below is measured against it.
+
+---
+
+## Step 1 — Thermal comfort as a deadline-storage constraint, behind a flag
+
+### 1.1 `stems/comfort.py`: the building envelope as a `(store, rate, required level, deadline)` device
+
+**What.** A new module with three objects.
+
+`RCThermalModel` is a first-order lumped-capacitance envelope,
+`C dT_in/dt = UA (T_out − T_in) + Φ + Φ_g`, discretised at the control step. Every
+parameter is SI and per building: `C` [J/K], `UA` [W/K], `Φ_g` [W], `dt` [s]. It ships
+**no default parameter values** and refuses `C < 1e5 J/K` or `UA < 1 W/K` — a hard
+thermal constraint built on an invented capacitance is a guarantee about nothing.
+`RCThermalModel.identify` fits `(C, UA, Φ_g)` per building by ordinary least squares on
+logged `(T_in, T_out, Φ)` and returns an `RCThermalFit` (R², one-step RMSE in K, sample
+count, time constant τ = C/UA in hours) alongside the model, so the fit quality is
+reported rather than assumed.
+
+`ThermalComfortBarrier` subclasses `stems.deadline.DeadlineStorageBarrier` — the same
+class the hot-water tank, the house battery and the electric vehicle instantiate, so
+the framework claim is structural and a test asserts the `isinstance`. The store is the
+zone's sensible heat, the rate limit is the heat pump's per-step temperature gain at
+full action, the required level is the set-point band less a tolerance θ, and the
+deadline is the current step at every occupied step. One instance per side of the band:
+`direction=+1` raises the heat-pump action towards the heating floor, `direction=−1`
+lowers it towards the cooling ceiling.
+
+The barrier's state is the temperature **predicted one step ahead with the heat pump
+off**. That matters: the free-running drift is then outside the controllable part, the
+delivered temperature change is exactly linear in the action, and the base class's
+`action_for_soc_gain` is exact rather than a linearisation.
+
+`build_comfort_barriers` is the gate. It is **off by default** (`ComfortConfig.enabled
+= False`) and refuses, with a specific reason, four configurations in which it could
+not actually bound a temperature: no heat-pump action; `hvac_control="setpoint"`; no
+heating set point in the observation vector; and no `RCThermalModel` supplied.
+
+**Why `hvac_control="setpoint"` is refused.** Under the set-point mode — which is
+`experiments/scenario.py::Scenario`'s default — the heat-pump action column is a
+±1.5 °C set-point offset and `stems/environment.py::thermostat_step` issues the power
+command through an integral loop the controller does not command. Projecting that
+column cannot bound a temperature. This is the same dimensional error already
+documented for `CBFShield._apply_hvac_power_guard`; it is refused here rather than
+repeated.
+
+**Why the barrier is off on CityLearn, measured.** Two findings, both from this track:
+
+1. Identifying the envelope from the **dataset's own series** — `energy_simulation.
+   indoor_dry_bulb_temperature`, the weather file's outdoor temperature, and the
+   recorded heating and cooling demands — returns a **non-physical fit**. On
+   `citylearn_schemas/tx_travis_8b`, winter training window, building 0:
+   `a = −2.158e−3 K/K per step` and `b = −5.880e−5 K/W per step`, i.e. negative `UA`
+   and negative `C`. The cause is that CityLearn's dataset reports the *ideal thermal
+   load* needed to hold the set point, not delivered power against a free-running
+   temperature, so the pair is not an input-output pair for an envelope at all.
+   `identify_from_citylearn` raises instead of clipping the fit, and a test pins the
+   raise.
+2. Identifying it from an **open-loop excitation rollout** — the heat-pump action
+   driven with an independent ±1/0 random signal per building, the *simulated*
+   temperature recorded, 672 steps, seed 0, same scenario — returns a signed-physical
+   but quantitatively useless envelope:
+
+   | quantity | across the 8 buildings |
+   |---|---|
+   | `C` | 13.55 – 103.94 MJ/K |
+   | `UA` | 779.8 – 7937.6 W/K |
+   | `τ = C/UA` | 2.27 – 5.68 h |
+   | R² on ΔT_in | 0.303 – 0.613 |
+   | one-step RMSE | **4.231 – 8.894 K** |
+
+   A one-step residual of 4–9 K against a 2 K comfort tolerance means the model's own
+   error is two to four times the bound it would enforce. A `UA` of 7.9 kW/K is also
+   not a dwelling. This is the quantitative version of `docs/REPORT_2026-10.md` §2
+   ("−0.25 cooling in winter lowers it 4–13 °C, which is not physical"; "one house's
+   model does not respond to cooling in autumn at all"), and it is the reason comfort
+   stays a soft reward term here and **no hard-comfort claim is made on CityLearn**.
+
+**Why the design is nonetheless standard.** `docs/LITERATURE.md` (Thermal comfort row)
+records that in the optimisation literature hard comfort is normal practice:
+[panagi2026thermal] embeds a calibrated 3R2C grey-box thermal model in a
+network-constrained optimal power flow "while explicitly enforcing thermal comfort,
+Distributed Energy Resource (DER) limits, and full power flow physics". The condition
+is a physical model one trusts. `identify_from_rollout` is the function that supplies
+one the day real measurements exist — the same call, the same barrier, the same arms,
+with a fit summary that can be inspected before the claim is made.
+
+**Evidence.** `tests/test_comfort_barrier.py`, 22 cases. The identification recovers
+`C`, `UA` and `Φ_g` from data generated by a known model to `rtol=1e-6`, `1e-6` and
+`1e-4` with R² > 0.999; it refuses a non-physical fit; the barrier is a
+`DeadlineStorageBarrier`; `gap × capacity` is the zone's missing sensible heat
+`C ΔT / 3.6e6` in kWh and `energy_still_required_kwh` divides it by the coefficient of
+performance to give electrical kWh; the projected heating action lands the predicted
+temperature exactly on the floor (`atol=1e-4 K`) and the cooling action exactly on the
+ceiling; the barrier only ever raises a heating action and never lowers it; over 200
+randomised band and temperature draws the two sides never bind together; and each of
+the five refusals raises with its own message. End-to-end on the real simulator:
+`tests/test_constraint_mechanisms.py::test_the_comfort_arm_runs_end_to_end_against_an_identified_envelope`
+and `::test_the_dataset_route_refuses_rather_than_returning_a_wrong_envelope`.
+
+### 1.2 Two comfort KPIs, reported separately
+
+**What.** `MetricsCalculator` gained `comfort_barrier_binding_rate` (how often the
+barrier had to intervene) and `comfort_band_breach_rate` (how often the band broke
+anyway, despite it).
+
+**Why.** They are different facts and collapsing them would hide the one that matters:
+a hard constraint whose breach rate is not zero is not hard. Reporting both is how the
+simulation-only status of the guarantee stays visible in the run record.
+
+**Evidence.** `tests/test_constraint_mechanisms.py::test_the_comfort_arm_runs_end_to_end_against_an_identified_envelope`
+asserts both keys are present and that the breach rate is a rate.
+
+---
