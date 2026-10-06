@@ -7,7 +7,7 @@ import time
 import traceback
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -162,14 +162,35 @@ def data_fingerprint(schema_path: Optional[str]) -> Dict[str, Any]:
 
 
 def make_config(scenario, learner: Optional[Dict[str, Any]] = None):
-    from stems.config import CBFConfig, STEMSConfig
+    from stems.config import CBFConfig, STEMSConfig, constraint_channel_names
 
     config = STEMSConfig()
     config.cbf = CBFConfig(P_grid_max=scenario.grid_cap_kw,
                            P_building_max=scenario.building_cap_kw)
     config.heat_pump.enabled = bool(getattr(scenario, "heat_pump", True))
     config.actor_critic.share_parameters = bool((learner or {}).get("share_parameters", False))
+    # Degradation price and budget are market/asset properties, so they belong to the
+    # scenario rather than to the arm. The arm names only the *form* of the model.
+    config.degradation.price_eur_per_kwh = float(
+        getattr(scenario, "degradation_price_per_kwh", 0.0))
+    limit = getattr(scenario, "degradation_limit_kwh_per_episode", None)
+    config.degradation.limit_kwh_per_episode = None if limit is None else float(limit)
+    config.degradation.dod_exponent = float(getattr(scenario, "degradation_dod_exponent", 0.0))
     return config
+
+
+def finalise_constraint_width(config) -> Tuple[str, ...]:
+    """Make the cost-critic width agree with the channels the collector will produce.
+
+    `num_constraints` is derived, never configured by hand: a critic with three outputs
+    fed a four-column cost array is a silent shape error in one direction and a dead
+    output in the other.
+    """
+    from stems.config import constraint_channel_names
+
+    names = constraint_channel_names(config)
+    config.lagrangian.num_constraints = len(names)
+    return names
 
 
 class ActuatorEvidence:
@@ -278,12 +299,26 @@ def train(agent, env, config, episodes: int, log: Callable[[str], None],
     fleet_shield = getattr(agent, "fleet_shield", None)
     battery_controlled = agent.elec_idx in agent.control_indices
 
+    channels = finalise_constraint_width(config)
+    degradation_channel = "battery_degradation" in channels
+    degradation_model = getattr(agent, "degradation_model", None)
+    accountant = None
+    if degradation_model is not None:
+        from stems.degradation import DegradationAccountant
+
+        accountant = DegradationAccountant(
+            degradation_model,
+            limit_kwh_per_episode=config.degradation.limit_kwh_per_episode,
+            episode_steps=max_steps)
+
     for ep in range(1, episodes + 1):
         t0 = time.time()
         obs, _ = env.reset()
         hist.reset()
         hist.prime(obs)   # audit B7: not a zero window
         buffer.reset()
+        if accountant is not None:
+            accountant.reset()
         if hasattr(getattr(agent, "base_policy", None), "reset"):
             agent.base_policy.reset()
         prev_net = [float(o[_IDX_NET]) for o in obs]
@@ -317,7 +352,16 @@ def train(agent, env, config, episodes: int, log: Callable[[str], None],
                 c_soc[:] = 0.0
             c_pow = (np.abs(net) > cbf.P_building_max).astype(np.float32)
             grid = float(np.maximum(net, 0.0).sum() > cbf.P_grid_max)
-            costs = np.stack([c_soc, c_pow, np.full(B, grid, dtype=np.float32)], axis=-1)
+            channel_costs = [c_soc, c_pow, np.full(B, grid, dtype=np.float32)]
+            if accountant is not None:
+                prev_soc = np.array([o[_IDX_SOC] for o in obs], dtype=np.float32)
+                fade_kwh = accountant.step(prev_soc, soc)
+                if degradation_channel:
+                    channel_costs.append(accountant.constraint_cost(fade_kwh))
+                penalty = accountant.reward_penalty(fade_kwh)
+                if float(np.abs(penalty).sum()) > 0.0:
+                    rewards = [r - float(p) for r, p in zip(rewards, penalty)]
+            costs = np.stack(channel_costs, axis=-1)
             violating += int(costs.max() > 0)
 
             hist.update(nxt)
@@ -331,9 +375,13 @@ def train(agent, env, config, episodes: int, log: Callable[[str], None],
             ep_reward += float(np.mean(rewards))
             obs = nxt
 
+        if accountant is not None:
+            accountant.flush()   # close the open half cycle before the episode is scored
         stats = agent.update(buffer.get_batch())
         row = {"episode": ep, "steps": n, "reward": ep_reward,
                "violating_step_rate": violating / max(n, 1),
+               "capacity_loss_kwh": (None if accountant is None
+                                     else float(accountant.cumulative_loss_kwh.sum())),
                "gradient_steps": int(stats.get("gradient_steps", 0)),
                "lambdas": stats.get("lambdas"), "entropy": stats.get("entropy"),
                "approx_kl": stats.get("approx_kl"), "clip_frac": stats.get("clip_frac"),
@@ -355,7 +403,10 @@ def evaluate(controller, env, config, max_steps: int) -> Dict[str, Any]:
     count_soc = controlled is None or env.electrical_storage_action_index in controlled
     metrics = MetricsCalculator(B, config.cbf, soc_rate=env.battery_info()["soc_rate"],
                                 heating_setpoint_idx=env.heating_setpoint_idx,
-                                count_soc=count_soc, hvac_idx=env.hvac_action_index)
+                                count_soc=count_soc, hvac_idx=env.hvac_action_index,
+                                degradation_model=getattr(controller, "degradation_model", None),
+                                degradation_limit_kwh=config.degradation.limit_kwh_per_episode,
+                                comfort_barriers=getattr(controller, "comfort_barriers", None))
     evidence = ActuatorEvidence(env)
     hist = HistoryBuffer(B, env.obs_dim, config.transformer.window_size)
     has_ev = not env.using_mock and bool(env.ev_action_indices())
@@ -395,7 +446,7 @@ def run_one(spec: Dict[str, Any]) -> Dict[str, Any]:
 
     from stems.environment import STEMSEnvironment
     from stems.utils import set_seed
-    from experiments.controllers import ARMS, build_controller
+    from experiments.controllers import ARMS, build_controller, mechanism_switches
     from experiments.scenario import Scenario
 
     out = Path(spec["out"])
@@ -438,11 +489,27 @@ def run_one(spec: Dict[str, Any]) -> Dict[str, Any]:
                 cfg.reward.lambda_indoor = 0.0
             return cfg
 
+        rc_model = None
+        if arm.comfort_barrier:
+            # The envelope is identified on the TRAINING window and then applied to the
+            # evaluation window. Identifying it on the evaluation data would fit the
+            # constraint to the period it is scored on.
+            from stems.comfort import identify_from_rollout
+
+            log("identify the building envelope on the training window")
+            probe_env = make_env(train_kw)
+            rc_model, rc_fit = identify_from_rollout(
+                probe_env, steps=min(672, _window_len(train_kw)), seed=seed)
+            record["meta"]["rc_model"] = rc_model.describe()
+            record["meta"]["rc_fit"] = rc_fit.summary()
+            log(f"envelope fit {rc_fit.summary()}")
+            del probe_env
+
         if arm.learns:
             log(f"train {scenario.key} arm={arm.name} seed={seed} episodes={episodes}")
             train_env = make_env(train_kw)
             train_config = fit_config(make_config(scenario, learner), train_env)
-            agent = build_controller(arm, train_env, train_config)
+            agent = build_controller(arm, train_env, train_config, rc_model=rc_model)
             record["train"] = train(agent, train_env, train_config, episodes, log,
                                     _window_len(train_kw))
             model_dir = out.parent / f"{out.stem}_model"
@@ -456,7 +523,11 @@ def run_one(spec: Dict[str, Any]) -> Dict[str, Any]:
         log("evaluate")
         eval_env = make_env(eval_kw)
         config = fit_config(make_config(scenario, learner), eval_env)
-        controller = build_controller(arm, eval_env, config)
+        controller = build_controller(arm, eval_env, config, rc_model=rc_model)
+        finalise_constraint_width(config)
+        degradation_model = getattr(controller, "degradation_model", None)
+        if degradation_model is not None:
+            record["meta"]["degradation_model"] = degradation_model.describe()
         if model_dir is not None:
             controller.load(str(model_dir))
         if getattr(controller, "fleet_shield", None) is not None:
@@ -481,9 +552,11 @@ def run_one(spec: Dict[str, Any]) -> Dict[str, Any]:
                                  else list(eval_env.absent_observations)),
             buildings_simulated=([b.name for b in eval_env._env.buildings]
                                  if not eval_env.using_mock else None),
+            constraint_channels=list(finalise_constraint_width(config)),
+            mechanism=dict(zip(("projection", "lagrangian"), mechanism_switches(arm))),
             config={k: asdict(getattr(config, k))
                     for k in ("cbf", "safety", "thermal", "training", "lagrangian", "reward",
-                              "actor_critic")})
+                              "actor_critic", "comfort", "degradation")})
         k = result["kpis"]
         log(f"done verified={result['actuators']['verified']} "
             f"violation={k.get('safety_violation_rate', float('nan')):.4f} "

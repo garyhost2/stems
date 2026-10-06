@@ -1,10 +1,18 @@
 """Step 8: arm names reserved for the baseline and constraint tracks.
 
-Each is registered in ``ARMS`` with the fields it needs and no builder. The contract
+Each was registered in ``ARMS`` with the fields it needs and no builder. The contract
 these tests pin is: the name resolves, ``Arm.implemented`` is False, and
 ``build_controller`` raises ``NotImplementedError`` with a message that says what to
 build — never a ``KeyError`` that reads like a typo, and never a silent fall-through to
 some other branch that would produce a run record looking like a result.
+
+**Edited by the constraints track.** Sixteen of the twenty-four names now have
+builders: the twelve-cell mechanism cross, the two hard-comfort arms and the two
+degradation arms. The reservation contract above is therefore asserted only over the
+eight comparison controllers that are still reserved, and the sixteen that landed are
+asserted to have the opposite properties — they resolve, report ``implemented is
+True``, and build. The alternative was to keep asserting that implemented work is
+missing. See CHANGELOG.md, constraints track, for the rule this is recorded under.
 """
 
 from __future__ import annotations
@@ -28,8 +36,11 @@ MECHANISM_2X2 = tuple(f"mech-{m}+{p}"
 COMFORT_ARMS = ("rl+calibrated+comfort", "rbc+calibrated+comfort")
 DEGRADATION_ARMS = ("rl+calibrated+degr-throughput", "rl+calibrated+degr-dod")
 
-ALL_PRE_REGISTERED = (COMPARISON_CONTROLLERS + MECHANISM_2X2 + COMFORT_ARMS
-                      + DEGRADATION_ARMS)
+#: Still reserved: the eight comparison controllers, for the baseline track.
+ALL_PRE_REGISTERED = COMPARISON_CONTROLLERS
+
+#: Landed in the constraints track. Same names, same fields, now with builders.
+IMPLEMENTED_BY_CONSTRAINTS_TRACK = (MECHANISM_2X2 + COMFORT_ARMS + DEGRADATION_ARMS)
 
 
 @pytest.mark.parametrize("name", ALL_PRE_REGISTERED)
@@ -57,7 +68,16 @@ def test_building_it_raises_not_implemented_with_a_useful_message(name):
 
 def test_the_pre_registered_set_is_exactly_what_we_declared():
     assert set(PRE_REGISTERED_ARMS) == set(ALL_PRE_REGISTERED)
-    assert len(PRE_REGISTERED_ARMS) == 8 + 12 + 2 + 2 == 24
+    assert len(PRE_REGISTERED_ARMS) == 8
+    assert len(ALL_PRE_REGISTERED) + len(IMPLEMENTED_BY_CONSTRAINTS_TRACK) == 24
+
+
+@pytest.mark.parametrize("name", IMPLEMENTED_BY_CONSTRAINTS_TRACK)
+def test_the_sixteen_constraint_arms_landed_under_their_reserved_names(name):
+    """Reserving the names worked: they were filled in, not restructured."""
+    assert name in ARMS and ARMS[name].name == name
+    assert ARMS[name].implemented is True
+    assert name not in PRE_REGISTERED_ARMS
 
 
 def test_the_eight_comparison_controllers_cover_table_one_plus_a_centralised_critic():
@@ -99,6 +119,9 @@ def test_the_comfort_and_degradation_flags_are_set():
         assert ARMS[name].comfort_barrier is True
     assert ARMS["rl+calibrated+degr-throughput"].degradation == "throughput"
     assert ARMS["rl+calibrated+degr-dod"].degradation == "throughput+dod"
+    assert all(ARMS[n].learns for n in ("rl+calibrated+comfort",
+                                        "rl+calibrated+degr-throughput"))
+    assert ARMS["rbc+calibrated+comfort"].learns is False
     # the implemented arms must not have acquired either flag
     assert ARMS["rl+calibrated"].comfort_barrier is False
     assert ARMS["rl+calibrated"].degradation == "none"

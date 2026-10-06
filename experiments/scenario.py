@@ -124,6 +124,18 @@ class Scenario:
     hvac_control: str = "setpoint"
     heat_pump: bool = True
     allow_missing_obs: bool = False
+    #: Price of one kWh of lost *storage capacity*, same currency per kWh as the
+    #: tariff, so the degradation cost and the bill are additive. 0.0 means fade is
+    #: measured and reported but does not enter the reward: a replacement cost is a
+    #: market number and does not belong in the code. See `stems/degradation.py`.
+    degradation_price_per_kwh: float = 0.0
+    #: Per-building capacity-loss budget for one episode, kWh. ``None`` leaves
+    #: degradation reported and unconstrained, which is where the literature stands.
+    degradation_limit_kwh_per_episode: Optional[float] = None
+    #: Depth-of-discharge stress exponent ``p``. 0.0 reduces the depth term to the
+    #: throughput term exactly; no non-zero value is asserted here because none was
+    #: verified against a source.
+    degradation_dod_exponent: float = 0.0
 
     @property
     def buildings(self) -> Optional[List[str]]:

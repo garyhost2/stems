@@ -1135,3 +1135,141 @@ advantage combinations differ by exactly the Lagrangian denominator; and
 it.
 
 ---
+
+## Step 4 — The constraint-mechanism 2×2, wired
+
+### 4.1 The two mechanisms are decoupled
+
+**What.** `experiments/controllers.py::mechanism_switches(arm)` returns
+`(projection_on, lagrangian_on)`, and `build_controller` now reads both instead of
+inferring them. `projection_on` drives `STEMSAgent(use_cbf=...)`, the `ShieldedController`
+versus `PlainController` choice, **and the fleet shield** — the LP is a projection too,
+so a cell with the projection off must have no projection of any kind or the cross
+isolates nothing. `lagrangian_on` drives the new `LagrangianConfig.enabled`.
+
+| `mechanism` | projection | constrained policy |
+|---|---|---|
+| `auto` | `barrier != "none"` | the policy learns |
+| `none` | off | off |
+| `lagrangian` | off | on |
+| `projection` | on | off |
+| `both` | on | on |
+
+`"auto"` reproduces the historical coupling exactly, so all seventeen pre-existing arms
+are unchanged; a test asserts that for every one of them.
+
+**Why this was the missing ablation.** Today `rl` has the Lagrangian and no barrier
+while `rl+calibrated` has both, so neither isolates a mechanism (audit C2). The twelve
+cells `mech-{none,lagrangian,projection,both}+{uniform,linear,exact}` do, and a test
+asserts that the twelve `Arm` records are identical in every field except `barrier` and
+`mechanism` — so once the grid driver gives them a common `--episodes`, the constraint
+mechanism is the only thing that differs.
+
+**The one thing `enabled=False` must not switch off.** The cost critics keep training in
+every cell, including `mechanism="none"`. They are the instrument that measures the
+violation rate, and the cells have to measure it the same way to be comparable; what
+`enabled` removes is only their effect on the actor. Two tests pin this: the cost-value
+loss is non-zero in the `none` cell, and the multipliers do not move there while they do
+move in the `lagrangian` cell.
+
+### 4.2 Three of the twelve cells are the same controller — flagged, not hidden
+
+**What.** `Arm.mechanism_is_plant_sensitive` is `False` for `mech-none+*` and
+`mech-lagrangian+*`.
+
+**Why.** The battery plant model is consulted only by the projection. With the
+projection off, `mech-none+uniform`, `mech-none+linear` and `mech-none+exact` are the
+same controller under three names, and likewise for `mech-lagrangian+*`. The cross keeps
+all twelve so the factorial is complete and the grid driver needs no special case, but
+**six of the twelve cells are duplicates of two**, and running them at five seeds each
+would spend 30 runs to produce 10 runs' worth of information. The aggregation should
+collapse them. (A smaller correction while here: the step-8 comment in
+`experiments/controllers.py` said "the four with mechanism='none'"; the cross has three
+plant models, so it is three. Corrected in the comment.)
+
+### 4.3 Provenance of each run
+
+**What.** `run_one` now records `meta.mechanism` (the two switches),
+`meta.constraint_channels` (the channel list the collector actually produced),
+`meta.rc_model` and `meta.rc_fit` for a comfort arm, and `meta.degradation_model` for a
+degradation arm, and `meta.config` gained the `comfort` and `degradation` sections.
+`agent.update` returns `mechanism_algorithm`.
+
+**Why.** A 2×2 whose run records do not say which cell they came from is not a 2×2. The
+fit summary in particular has to be in the record: a comfort result is only readable
+next to the R² and RMSE of the envelope it was enforced against.
+
+### 4.4 The envelope is identified on the training window only
+
+**What.** When `arm.comfort_barrier`, `run_one` runs the excitation rollout on a
+**training-window** environment and passes the resulting `RCThermalModel` to both the
+training and the evaluation builds, through the new `build_controller(..., rc_model=)`.
+
+**Why.** Identifying it on the evaluation window would fit the constraint to the period
+it is scored on. This is the same time-based split rule the project applies to
+everything else.
+
+### 4.5 Cost-critic width is derived, never configured
+
+**What.** `build_controller` sets `config.lagrangian.num_constraints` from
+`constraint_channel_names(config)` *after* the degradation mode is resolved and *before*
+the agent is constructed; `experiments/runner.py::finalise_constraint_width` does the
+same for the collector and the run record.
+
+**Why, and this was a real bug caught in a smoke test.** The critic's output width is
+read at construction time. Deriving the channel list later built a three-output critic
+for a four-column cost array.
+
+### 4.6 Tests edited to accommodate these changes — recorded under the test-editing rule
+
+Three existing tests asserted that this work was *missing*. They now assert that it
+landed. Recording each, with why editing was the right move rather than a way around a
+failure:
+
+* `tests/test_preregistered_arms.py` asserted `implemented is False` and a
+  `NotImplementedError` for all 24 reserved names. Sixteen of them now have builders.
+  The reservation contract — the name resolves, reports unimplemented, and raises a
+  message longer than 120 characters saying what to build — is still asserted in full
+  over the eight comparison controllers that remain reserved for the baseline track,
+  and the sixteen that landed are asserted to have the opposite properties under a new
+  parametrised case. The alternative was to keep asserting that implemented work is
+  absent.
+* `tests/test_experiments.py::test_the_ablation_arms` is an inventory of arms that
+  build. It grew from 17 entries to 33, and its learning-arm list from 10 to 25. An
+  inventory that does not list new arms is not an inventory; it still fails the moment
+  an arm is added or changed without being declared.
+* `Arm.implemented` itself was narrowed from "no reserved policy **and** `mechanism ==
+  "auto"` **and** no comfort barrier **and** no degradation" to "no reserved policy".
+  The three extra conditions existed only to mark this track's work as absent.
+
+**Evidence.** `tests/test_constraint_mechanisms.py`, 40 cases, covering §§3 and 4; plus
+`tests/test_preregistered_arms.py` (48) and `tests/test_experiments.py` (42) as edited.
+
+---
+
+## Test floor after the constraints track
+
+`python -m pytest tests/ -q` on the final commit: **452 passed, 15 skipped, 1 warning,
+0 failed** (141.37 s), against the entry floor of 404 passed / 15 skipped / 0 failed.
+The 15 skips are the same missing-EV-dataset skips as on entry; the warning is the
+pre-existing `requires_grad` one in `tests/test_experiments.py`. Net **+48 passing, 0
+failing, nothing newly skipped**. The new cases are
+`tests/test_comfort_barrier.py` (22), `tests/test_degradation.py` (18) and
+`tests/test_constraint_mechanisms.py` (40, of which five drive the real simulator
+end to end); `tests/test_preregistered_arms.py` and `tests/test_experiments.py` were
+edited rather than added to, as recorded in step 4.6.
+
+## Not done, and why
+
+* **Nothing was trained.** Per the brief, this track makes the controllers exist, be
+  correct and be validated; the mechanism grid is a later phase.
+* **Transformer thermal limits** (the other half of audit C1's "do not exist") were not
+  implemented. `docs/LITERATURE.md` records transformer loss of life as a reported
+  *outcome* in [panagi2026thermal] and a genuine constraint only in
+  [botkinlevy2020distributed], where charging is coordinated "under nonlinear
+  transformer temperature ratings". A loading-history-dependent thermal limit needs a
+  transformer model and a network the CityLearn schema does not contain; the district
+  import cap is the only grid-side limit this testbed can support. Stated rather than
+  stubbed.
+* **No `p > 0` default for the depth-of-discharge term**, and no calendar-ageing rate.
+  Both would be unsourced numbers inside a constraint.
