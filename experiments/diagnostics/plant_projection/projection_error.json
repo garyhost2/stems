@@ -1,0 +1,77 @@
+[
+  {
+    "model": "BatteryModel",
+    "unit_forward": "state of charge (dimensionless)",
+    "unit_inverse": "state of charge (dimensionless)",
+    "forward": {
+      "max": 2.9760222175490014e-08,
+      "p95": 2.7287631665373623e-08,
+      "mean": 1.1011002500219237e-08,
+      "n": 938
+    },
+    "inverse": {
+      "max": 5.341282971471628e-13,
+      "p95": 3.6920327906031424e-13,
+      "mean": 9.608586173887146e-14,
+      "n": 6680
+    },
+    "unsaturated_share": 0.7021,
+    "schema": "citylearn_schemas/tx_travis_8b/schema.json",
+    "window_steps": 168
+  },
+  {
+    "model": "TankModel",
+    "unit_forward": "heater electricity, kWh per step",
+    "unit_inverse": "state of charge (dimensionless)",
+    "forward": {
+      "max": 3.2729702059697274e-07,
+      "p95": 6.811459002508518e-08,
+      "mean": 1.1445514329034813e-08,
+      "n": 1912
+    },
+    "inverse": {
+      "max": 9.490186414495838e-13,
+      "p95": 8.135714324453147e-13,
+      "mean": 2.681017541863553e-13,
+      "n": 9560
+    },
+    "unsaturated_share": 1.0,
+    "schema": "citylearn_schemas/tx_travis_8b_ev/schema.json",
+    "window_steps": 240
+  },
+  {
+    "model": "EVFleetModel",
+    "unit_forward": "state of charge (dimensionless)",
+    "unit_inverse": "charger draw, kW",
+    "forward": {
+      "max": 9.775814349999301e-05,
+      "p95": 6.754648275797415e-05,
+      "mean": 1.988886062023703e-05,
+      "n": 981
+    },
+    "inverse": {
+      "max": 6.545248476541587e-07,
+      "p95": 5.509775739653832e-07,
+      "mean": 1.400223615470964e-07,
+      "n": 2909
+    },
+    "draw_kw": {
+      "max": 0.007361718019382901,
+      "p95": 0.005290748777958543,
+      "mean": 0.0012325761852439404,
+      "n": 981
+    },
+    "dead_band_miss_kw": {
+      "max": 1.038487238466764,
+      "p95": 0.37723972487069807,
+      "mean": 0.11468462109284991,
+      "n": 1996
+    },
+    "p_min_kw": [
+      1.4
+    ],
+    "unsaturated_share": 1.0,
+    "schema": "citylearn_schemas/tx_travis_8b_ev/schema.json",
+    "window_steps": 240
+  }
+]

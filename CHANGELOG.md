@@ -1716,3 +1716,71 @@ edited rather than added to, as recorded in step 4.6.
   stubbed.
 * **No `p > 0` default for the depth-of-discharge term**, and no calendar-ageing rate.
   Both would be unsourced numbers inside a constraint.
+
+---
+
+# Abstraction track — branch `framework/abstraction`
+
+Entry state, confirmed before the first edit: `PYTHONPATH=. XDG_CACHE_HOME=<repo>/.citylearn_cache
+python -m pytest tests/ -q -p no:randomly` → **538 passed, 0 failed, 0 skipped**, 294.34 s,
+one pre-existing `requires_grad` warning in `stems/mappo.py:258`.
+
+**The invocation matters and is recorded here because it cost a confused half hour.**
+Without `PYTHONPATH=.` the same command reports **524 passed, 14 skipped**: the fourteen
+are the electric-vehicle and schema-dependent cases in `tests/test_ev_real.py`,
+`tests/test_env_widening.py`, `tests/test_ev_schema.py`, `tests/test_fleet.py` and
+`tests/test_mpc.py`, which catch an `ImportError` on `stems` and convert it into
+`pytest.skip("... dataset unavailable")`. The dataset is present; `stems` was not
+importable. A skip whose reason names the data when the cause is the path is a trap,
+but fixing it is a test edit outside this track's brief, so it is recorded rather than
+changed. **Every test count in this track is taken with `PYTHONPATH=.`.**
+
+## Step 1 — The framework stated in one page
+
+**What.** `docs/FRAMEWORK.md`, new. It states the abstraction the repository already
+implements implicitly — a household flexible load is a *store* with a *rate limit* that
+must reach a *required level* by a *deadline*, and a neighbourhood is a set of such
+loads under one shared *import cap* — defines every symbol once against the name the
+code uses, and separates what is measured from what is assumed and what is unsourced.
+
+**Why.** The object was real but distributed: `stems/deadline.py` holds the device,
+`stems/fleet.py` holds the cap, and `stems/comfort.py`'s module docstring was the only
+place the tuple was written down, for one of the four loads. A framework that has to be
+reconstructed from four modules is not a contribution anyone else can use.
+
+**Evidence.** The exactness claim in §3 is measured, not asserted.
+`experiments/plant_projection_error.py` (new) drives the real CityLearn simulator and
+reports, per plant model, the forward error against the simulator and the inverse
+round-trip error of the bisection the projection uses. Output written to
+`experiments/diagnostics/plant_projection/projection_error.json`:
+
+| plant model | forward max | inverse max | samples |
+|---|---|---|---|
+| `BatteryModel` | 2.976e-08 soc | 5.341e-13 soc | 938 steps (70.2% unsaturated) |
+| `TankModel` | 3.273e-07 kWh/step | 9.490e-13 soc | 1912 |
+| `EVFleetModel` | 9.776e-05 soc (7.362e-03 kW on the draw) | 6.545e-07 kW | 981 |
+
+Three findings came out of measuring rather than quoting.
+
+1. The battery number is over **unsaturated steps only** — 70.2% of the rollout. On the
+   other 29.8% the device clips at its depth-of-discharge floor or at `soc = 0.95` and
+   the model does not agree with the plant; it is conservative in the protected
+   direction instead, which is the property the projection needs and which
+   `tests/test_battery_model.py::test_model_errs_toward_the_bound_being_protected`
+   already pins. Reporting one error figure without that split would overstate the
+   model.
+2. The EV charger's inverse initially measured a **1.038 kW** maximum miss. That is not
+   solver error: `p_min = 1.4 kW` on this schema makes the attainable draw set
+   `{0} u [p_min, p_max]`, a non-convex set, so any target inside the dead band is
+   unattainable by construction. Split apart, the inverse is exact to 6.545e-07 kW on
+   attainable targets and the dead-band miss is reported separately
+   (`dead_band_miss_kw`, max 1.038 kW over 1996 unattainable targets).
+   `stems.fleet.apply_dead_band` is what resolves those in the shield.
+3. **`DeadlineStorageBarrier` does not use any of these exact inverses.** Its forced
+   action comes from `action_for_soc_gain`, the linear map `gap / rate * action_bound`,
+   and `EVReadinessBarrier` compensates with `rate_derate = 0.85`. The exact inverses
+   are used by `stems/fleet.py` (the cap LP) and `stems/mpc.py`. This is recorded as a
+   dispute with the brief under step 2, not silently fixed.
+
+**Not claimed.** `docs/FRAMEWORK.md` §6 forward-references `stems/protocols.py`,
+`stems/replay.py` and `stems/legionella.py`, which land in steps 3 and 4 of this track.
