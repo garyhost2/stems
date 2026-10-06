@@ -282,7 +282,7 @@ def train(agent, env, config, episodes: int, log: Callable[[str], None],
         t0 = time.time()
         obs, _ = env.reset()
         hist.reset()
-        hist.update(obs)
+        hist.prime(obs)   # audit B7: not a zero window
         buffer.reset()
         if hasattr(getattr(agent, "base_policy", None), "reset"):
             agent.base_policy.reset()
@@ -361,7 +361,7 @@ def evaluate(controller, env, config, max_steps: int) -> Dict[str, Any]:
     has_ev = not env.using_mock and bool(env.ev_action_indices())
 
     obs, _ = env.reset()
-    hist.update(obs)
+    hist.prime(obs)   # audit B7: not a zero window
     n, done = 0, False
     while not done:
         actions = controller.select_action(obs, hist.get(), explore=False)

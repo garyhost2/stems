@@ -26,6 +26,9 @@ class Arm:
     forced_penalty: float = 0.0
     ev_floor: float = 0.0
     control: Optional[Tuple[str, ...]] = None
+    #: Adjacency the GCN mixes over: "feature" (the default, built from real per-building
+    #: device characteristics) or "mean_pool" (uniform, the ablation the GCN must beat).
+    graph_mode: str = "feature"
 
     @property
     def learns(self) -> bool:
@@ -49,6 +52,10 @@ ARMS: Dict[str, Arm] = {a.name: a for a in (
     Arm("rl+calibrated+floor", "rl", "calibrated", ev_floor=0.5),
     Arm("hp-shift", "hp-shift", "none"),
     Arm("rl-hp", "rl", "none", control=("cooling_or_heating_device",)),
+    # Audit B6: with the fabricated positional term gone, the GCN has to earn its
+    # place on features alone. This arm is identical to rl+calibrated except that
+    # every edge weight is 1, i.e. the encoder mean-pools over buildings.
+    Arm("rl+calibrated+meanpool", "rl", "calibrated", graph_mode="mean_pool"),
 )}
 
 
@@ -255,6 +262,7 @@ def build_controller(arm: Arm, env, config):
 
     if arm.policy == "rl":
         info = env.get_building_info()
+        config.graph.mode = arm.graph_mode
         graph = BuildingGraph(B, info["positions"], info["features"], config.graph)
         config.training.intervention_penalty = float(arm.penalty)
         config.training.forced_charge_penalty = float(arm.forced_penalty)

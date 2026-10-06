@@ -181,6 +181,25 @@ class HistoryBuffer:
         self.window_size = window_size
         self._buffer = np.zeros((num_buildings, window_size, obs_dim), dtype=np.float32)
 
+    def prime(self, obs_list: List[np.ndarray]) -> None:
+        """Fill the whole window with the first observation of an episode.
+
+        Audit B7: the buffer was zero-filled at construction and only pushed one
+        observation per step, so for the first ``window_size - 1`` steps of every
+        episode the transformer attended over a window that was mostly the *normalised
+        value of zero* -- not a missing-data token, but a spurious observation that
+        normalises to whatever `-mean/std` happens to be. On a 14-day episode with a
+        24-step window that is 23 of 336 steps, 7% of the episode, and it is exactly the
+        stretch where the running normaliser is least calibrated.
+
+        Repeating the first observation is the constant-extrapolation convention: the
+        window says "nothing has changed yet", which is true at t = 0, instead of
+        "every signal was zero", which is false for a temperature in degC or a state of
+        charge. Call this instead of ``update`` immediately after ``env.reset()``.
+        """
+        first = np.array(obs_list, dtype=np.float32)
+        self._buffer[:] = first[:, None, :]
+
     def update(self, obs_list: List[np.ndarray]) -> None:
         new_obs = np.array(obs_list, dtype=np.float32)
         self._buffer = np.roll(self._buffer, shift=-1, axis=1)

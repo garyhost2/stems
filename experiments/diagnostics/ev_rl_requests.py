@@ -43,7 +43,7 @@ layout = env.ev_obs_layout()[0]
 def rollout(environment, record):
     hist = HistoryBuffer(environment.num_buildings, environment.obs_dim, config.transformer.window_size)
     obs, _ = environment.reset()
-    hist.update(obs)
+    hist.prime(obs)   # audit B7
     done, rows, deps = False, [], []
     while not done:
         hour = int(round(float(obs[0][_IDX_HOUR])))

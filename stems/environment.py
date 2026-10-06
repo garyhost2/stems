@@ -274,8 +274,11 @@ class STEMSEnvironment:
                  allow_resized_simulation: bool = False,
                  patch_t0_double_count: bool = True,
                  patch_endogenous_obs: bool = True,
-                 hvac_control: str = "power") -> None:
+                 hvac_control: str = "power",
+                 citylearn_seed: Optional[int] = None) -> None:
         self._seed = seed
+        self._citylearn_seed = citylearn_seed
+        self._citylearn_seed_used: Optional[int] = None
         self._heat_pump = heat_pump
         self._comm_dropout = 0.0
         self._temp_offset = 0.0
@@ -331,14 +334,27 @@ class STEMSEnvironment:
                 "for synthetic smoke tests only."
             )
         schema = self._resolve_schema(requested_schema)
-        # Audit E3: the seed used to reach torch, numpy and python but never CityLearn,
-        # so `seed` did not seed the simulator. Harmless while the simulation is
-        # deterministic given the schema, but a stochastic element -- a randomised EV
-        # schedule, a stochastic occupancy model, CityLearn's own random episode split --
-        # would have been unreproducible and the run record would not have said so. An
-        # explicit random_seed in env_kwargs still wins.
+        # Audit E3 asked for the run seed to be forwarded to CityLearn. It must NOT be,
+        # and the reason is measured rather than argued -- see CHANGELOG.md step 5.
+        # CityLearnEnv(random_seed=s) overrides the per-building random_seed the schema
+        # carries and re-randomises device autosizing, so the *houses* become a function
+        # of the replication seed. Battery capacities over the eight Travis buildings:
+        #   unseeded / seed 0 : [12.0, 7.0,  3.3, 14.0, 5.0, 15.0, 14.4, 12.0] kWh
+        #   seed 7            : [13.5, 10.0, 5.0, 13.5, 5.4, 13.5, 13.5, 17.5] kWh
+        #   seed 4321         : [12.0, 13.5, 3.3,  8.0, 3.5, 10.8, 23.1, 10.5] kWh
+        # Seeds are the replication unit *within* a scenario, so forwarding the seed
+        # would mean five "seeds" of one scenario were five different neighbourhoods and
+        # the scenario-level statistics in experiments/aggregate.py would be averaging
+        # across building stocks. The schema defines the houses; the seed must not.
+        #
+        # Reproducibility of any genuinely stochastic element is handled explicitly:
+        # pass citylearn_seed=... (or env_kwargs["random_seed"]) to seed the simulator
+        # deliberately, and the chosen value is reported by `citylearn_seed` so a run
+        # record can state it.
         kwargs = dict(self._env_kwargs)
-        kwargs.setdefault("random_seed", int(self._seed))
+        if self._citylearn_seed is not None:
+            kwargs.setdefault("random_seed", int(self._citylearn_seed))
+        self._citylearn_seed_used = kwargs.get("random_seed")
         try:
             return CityLearnEnv(schema=schema, central_agent=False, **kwargs)
         except Exception as exc:
@@ -765,6 +781,17 @@ class STEMSEnvironment:
         return self._action_dim
 
     @property
+    def citylearn_seed(self) -> Optional[int]:
+        """The seed actually handed to CityLearn, or None if it was left unseeded.
+
+        None is the default and the right answer for an ordinary run: seeding CityLearn
+        changes device autosizing and therefore the buildings (audit E3, corrected --
+        see CHANGELOG.md step 5). Recorded in the run metadata so a record states which
+        it was rather than leaving it to be inferred.
+        """
+        return self._citylearn_seed_used
+
+    @property
     def using_mock(self) -> bool:
         return self._mock
 
@@ -950,25 +977,59 @@ class STEMSEnvironment:
         return out
 
 
+    #: Per-building characteristics the graph is built from, in order. Each is a device
+    #: nameplate rating or efficiency read off the live CityLearn building, so each is
+    #: known before the first time step and carries no information from any evaluation
+    #: window: using them cannot leak (audit B6). SI units: kWh for capacities, kW for
+    #: nominal powers, dimensionless for efficiencies.
+    GRAPH_FEATURES: List[Tuple[str, Tuple[str, ...], str]] = [
+        ("battery_capacity_kwh", ("electrical_storage", "capacity"), "kWh"),
+        ("battery_nominal_power_kw", ("electrical_storage", "nominal_power"), "kW"),
+        ("pv_nominal_power_kw", ("pv", "nominal_power"), "kW"),
+        ("heating_nominal_power_kw", ("heating_device", "nominal_power"), "kW"),
+        ("cooling_nominal_power_kw", ("cooling_device", "nominal_power"), "kW"),
+        ("dhw_nominal_power_kw", ("dhw_device", "nominal_power"), "kW"),
+        ("dhw_storage_capacity_kwh", ("dhw_storage", "capacity"), "kWh"),
+        ("heating_efficiency", ("heating_device", "efficiency"), "-"),
+    ]
+
     def get_building_info(self) -> Dict[str, Any]:
+        """Node features for the building graph.
+
+        Returns ``positions=None`` for the real environment. CityLearn's ``Building``
+        exposes no ``latitude``, ``longitude`` or ``floor_area`` — checked on 2.6.0b1
+        against the live objects, the schema's per-building keys, the dataset directory,
+        the ResStock time-series header and this repository's own sizing file — so the
+        previous implementation always fell through to coordinates generated from the
+        building's index in the schema and a constant 150 m^2 floor area (audit B6).
+        Rather than keep inventing geometry, the graph is feature-based; see
+        ``GRAPH_FEATURES`` for what it is built from and CHANGELOG.md step 6 for the
+        consequence the paper has to state.
+
+        Features are z-scored per column so that no single large-magnitude column (PV in
+        kW, say) dominates the squared distance, and so the median-heuristic bandwidth in
+        ``BuildingGraph`` has a scale-free meaning.
+        """
         B = self._num_buildings
         if not self._mock:
             try:
-                positions = np.zeros((B, 2), dtype=np.float32)
-                feats = []
-                for i, bld in enumerate(self._env.buildings):
-                    lat = getattr(bld, "latitude", None) or (30.26 + 0.01 * i)
-                    lon = getattr(bld, "longitude", None) or (-97.74 + 0.01 * i)
-                    positions[i] = [float(lat), float(lon)]
-                    cap = float(getattr(bld.electrical_storage, "capacity", 6.4))
-                    area = float(getattr(bld, "floor_area", 150.0))
-                    feats.append([cap, area])
-                features = np.asarray(feats, dtype=np.float32)
-                for c in range(features.shape[1]):
-                    span = features[:, c].max() - features[:, c].min()
-                    if span > 1e-6:
-                        features[:, c] = (features[:, c] - features[:, c].min()) / span
-                return {"positions": positions, "features": features}
+                rows = []
+                for bld in self._env.buildings:
+                    row = []
+                    for _, (device, attr), _ in self.GRAPH_FEATURES:
+                        obj = getattr(bld, device, None)
+                        value = getattr(obj, attr, None) if obj is not None else None
+                        row.append(0.0 if value is None else float(value))
+                    rows.append(row)
+                features = np.asarray(rows, dtype=np.float32)
+                mean = features.mean(axis=0, keepdims=True)
+                std = features.std(axis=0, keepdims=True)
+                features = (features - mean) / np.where(std > 1e-9, std, 1.0)
+                constant = [name for j, (name, _, _) in enumerate(self.GRAPH_FEATURES)
+                            if std[0, j] <= 1e-9]
+                return {"positions": None, "features": features,
+                        "feature_names": [n for n, _, _ in self.GRAPH_FEATURES],
+                        "constant_features": constant}
             except Exception as exc:
                 raise RuntimeError(
                     f"Could not read CityLearn building metadata for the graph: {exc!r}"

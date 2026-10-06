@@ -1,15 +1,32 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 
 @dataclass
 class GraphConfig:
+    """Adjacency of the building graph the GCN mixes over.
+
+    ``mode``:
+      ``"feature"``            w_ij = exp(-||f_i - f_j||^2 / (2 sigma_f^2)), the default.
+      ``"feature+position"``   the original alpha/beta mix of a positional and a feature
+                               kernel. Needs real coordinates, which CityLearn does not
+                               provide; see CHANGELOG.md step 6.
+      ``"mean_pool"``          w_ij = 1 for i != j. Uniform pooling, the ablation the GCN
+                               has to beat.
+
+    ``sigma_f = None`` selects the median heuristic: sigma_f is set so that the median
+    off-diagonal squared feature distance maps to exp(-1) ~ 0.368. A fixed bandwidth has
+    no meaning independent of how the features are scaled, which is how the original
+    sigma_d = 1.0 came to produce edge weights spanning 2.4e-3.
+    """
+
+    mode: str = "feature"
     alpha: float = 0.5
     beta: float = 0.5
     sigma_d: float = 1.0
-    sigma_f: float = 1.0
+    sigma_f: Optional[float] = None
 
 
 @dataclass

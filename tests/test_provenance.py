@@ -27,23 +27,60 @@ needs_ev_schema = pytest.mark.skipif(not EV_SCHEMA.is_file(),
 
 # ------------------------------------------------------------------ audit E3 --
 
-def test_the_seed_reaches_citylearn():
-    """`seed` must seed the simulator, not only torch/numpy/python."""
+@needs_schema
+def test_seeding_citylearn_changes_the_buildings_themselves():
+    """Why audit E3's prescription is not implemented. Measured, not argued.
+
+    CityLearnEnv(random_seed=s) overrides the per-building random_seed the schema
+    carries and re-randomises device autosizing, so the houses become a function of the
+    seed. Seeds are the replication unit *within* a scenario, so forwarding the run seed
+    would make five "seeds" five different neighbourhoods.
+    """
     from stems.environment import STEMSEnvironment
 
-    if not SCHEMA.is_file():
-        pytest.skip(f"generated schema absent: {SCHEMA}")
-    env = STEMSEnvironment(schema=str(SCHEMA), seed=4321, heat_pump=True)
+    def capacities(**kw):
+        env = STEMSEnvironment(schema=str(SCHEMA), seed=0, heat_pump=True, **kw)
+        return [round(float(b.electrical_storage.capacity), 4)
+                for b in env._env.buildings]
+
+    unseeded = capacities()
+    # Battery capacities in kWh over the eight Travis buildings. Unseeded, CityLearn
+    # uses the per-building random_seed the schema carries, which is deterministic:
+    # the same list comes back in a fresh process every time.
+    assert unseeded == [10.8, 6.6, 5.0, 9.7, 13.5, 5.4, 16.2, 16.0]
+    assert capacities(citylearn_seed=7) == [13.5, 10.0, 5.0, 13.5, 5.4, 13.5, 13.5, 17.5]
+    assert capacities(citylearn_seed=4321) == [12.0, 13.5, 3.3, 8.0, 3.5, 10.8, 23.1, 10.5]
+    assert capacities(citylearn_seed=7) != unseeded
+
+
+@needs_schema
+def test_the_run_seed_does_not_reach_citylearn_by_default():
+    """The building stock must be a property of the schema, not of the replication."""
+    from stems.environment import STEMSEnvironment
+
+    caps = {}
+    for seed in (0, 7, 4321):
+        env = STEMSEnvironment(schema=str(SCHEMA), seed=seed, heat_pump=True)
+        assert env.citylearn_seed is None, (
+            "the run seed must not be forwarded to CityLearn; it would re-randomise "
+            "device autosizing and change the houses between replications")
+        caps[seed] = [float(b.electrical_storage.capacity) for b in env._env.buildings]
+    assert caps[0] == caps[7] == caps[4321]
+
+
+@needs_schema
+def test_citylearn_can_still_be_seeded_deliberately_and_the_choice_is_reported():
+    """Audit E3's real requirement: the record must state what seeded the simulator."""
+    from stems.environment import STEMSEnvironment
+
+    env = STEMSEnvironment(schema=str(SCHEMA), seed=1, heat_pump=True,
+                           citylearn_seed=4321)
+    assert env.citylearn_seed == 4321
     assert int(getattr(env._env, "random_seed")) == 4321
 
-
-def test_an_explicit_random_seed_in_env_kwargs_wins():
-    from stems.environment import STEMSEnvironment
-
-    if not SCHEMA.is_file():
-        pytest.skip(f"generated schema absent: {SCHEMA}")
     env = STEMSEnvironment(schema=str(SCHEMA), seed=1, heat_pump=True,
                            env_kwargs={"random_seed": 99})
+    assert env.citylearn_seed == 99
     assert int(getattr(env._env, "random_seed")) == 99
 
 

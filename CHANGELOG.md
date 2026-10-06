@@ -449,7 +449,7 @@ run record would not have said so.
 - the electric-vehicle `charger_*.csv` files beside the schema, hashed with CRLF
   normalised to LF so the line-ending drift of audit E2 cannot move the digest.
 
-For `citylearn_schemas/tx_travis_8b/schema.json` this covers 20 files (7.5 MB, about
+For `citylearn_schemas/tx_travis_8b/schema.json` this covers 21 files (7.5 MB, about
 15 ms) and reports `data_missing: []`.
 
 **Why a second field rather than a wider one.** More than 400 stored records already
@@ -480,3 +480,200 @@ the digest alone, a one-cell edit moves it);
 actually-installed package versions are not resolved and compared against it, so an
 environment that drifts from the lock file is not detected. Recorded in the function's
 docstring.
+
+---
+
+## Step 5, revisited — the run seed must **not** reach CityLearn (audit E3, **corrected**)
+
+Entry 5.1 above is superseded. The forwarding it describes was implemented, found to be
+harmful by the test suite, and reverted in the same session.
+
+**What went wrong.** `CityLearnEnv(random_seed=s)` overrides the per-building
+`random_seed` the schema carries and **re-randomises device autosizing**, so the houses
+become a function of the seed. Battery capacity, kWh, over the eight Travis buildings:
+
+| | b1 | b2 | b3 | b4 | b5 | b6 | b7 | b8 |
+|---|---|---|---|---|---|---|---|---|
+| unseeded (schema's own per-building seeds) | 10.8 | 6.6 | 5.0 | 9.7 | 13.5 | 5.4 | 16.2 | 16.0 |
+| `random_seed=7` | 13.5 | 10.0 | 5.0 | 13.5 | 5.4 | 13.5 | 13.5 | 17.5 |
+| `random_seed=4321` | 12.0 | 13.5 | 3.3 | 8.0 | 3.5 | 10.8 | 23.1 | 10.5 |
+
+Four tests caught it immediately — `test_battery_info_is_per_building_and_plausible`
+(`soc_rate` containing values at or below 0.1), `test_barrier_keeps_the_band_and_uses_all_of_it`,
+`test_cbf_feasibility_and_safety_on_real_data`, and
+`test_battery_info_is_per_building_and_plausible`. They were right and the change was
+wrong.
+
+**Why it is wrong in principle, not just inconvenient.** The seed is the replication unit
+*within* a scenario, and `experiments/aggregate.py` averages seeds inside a scenario
+before treating the scenario as the unit of analysis. If the seed changes the building
+stock, then five "seeds" of one scenario are five different neighbourhoods, the
+within-scenario average is across building stocks rather than across policy
+initialisations, and every confidence interval in the study silently widens for the wrong
+reason. The schema defines the houses; the seed must not.
+
+**Audit E3 is therefore partly wrong.** Its observation — the seed reaches torch, numpy
+and python but not the simulator — is correct. Its premise, that forwarding it is
+"harmless today because the simulation is deterministic given the schema", is not: the
+*construction* of the environment is seed-sensitive even though its dynamics are not.
+
+**What was implemented instead.** An explicit, opt-in `citylearn_seed` argument on
+`STEMSEnvironment`, default `None`, plus a `citylearn_seed` property reporting the value
+actually handed to the simulator (or `None`). That meets E3's real requirement — a run
+record can state what seeded the simulator instead of leaving it to be inferred —
+without making the houses a function of the replication. The reasoning and the measured
+capacities are in the code comment at the call site, so the next person to reach for
+`random_seed=` meets the evidence first.
+
+**Evidence.** `tests/test_provenance.py`:
+`test_seeding_citylearn_changes_the_buildings_themselves` pins all three capacity vectors
+above; `test_the_run_seed_does_not_reach_citylearn_by_default` asserts that seeds 0, 7 and
+4321 give identical capacities and `citylearn_seed is None`;
+`test_citylearn_can_still_be_seeded_deliberately_and_the_choice_is_reported` pins the
+opt-in path and the `env_kwargs` override. Unseeded autosizing is deterministic —
+the same capacity vector comes back in three fresh processes and twice in one process.
+
+Entry 5.2 (the data fingerprint) is unaffected and stands.
+
+---
+
+## Step 6 — Give the building graph real inputs (audit B6, B7)
+
+### 6.1 There are no coordinates and no floor areas. The graph is now feature-based.
+
+**What was checked.** CityLearn 2.6.0b1 exposes no building geometry anywhere:
+
+- the live `Building` objects have no `latitude`, `longitude`, `floor_area`, `area`,
+  `coordinates` or `location` attribute (asserted in a test, so a future CityLearn that
+  adds one will fail it rather than go unnoticed);
+- the schema's per-building keys are devices, storage, dynamics, `include`, `pricing`,
+  `carbon_intensity`, `type`, `weather` — no geometry;
+- the dataset directory holds per-building time series, `.pth` dynamics models and
+  `dynamics_error_summary.csv`;
+- the ResStock time-series header is month, hour, day type, daylight savings, indoor
+  temperature and humidity, non-shiftable load, DHW/cooling/heating demand, solar
+  generation, occupant count, the two set points, HVAC mode;
+- this repository's own `citylearn_schemas/_sizing/tx_travis_county_neighborhood__fullyear_raw.json`
+  gives device sizes for 100 buildings and no geometry.
+
+So `get_building_info()` always fell through to coordinates generated from the building's
+index, `(30.26 + 0.01*i, -97.74 + 0.01*i)`, and a constant 150 m² floor area (audit B6).
+
+**Stated plainly, because the paper has to say it: the published architecture's spatial
+term is not recoverable from this dataset. The graph is feature-based, and the
+"spatio-temporal" claim must be worded accordingly.** No coordinates were invented.
+
+**What the graph is built from instead.** Eight per-building device characteristics read
+off the live CityLearn objects, all nameplate ratings or efficiencies fixed before the
+first time step, so none of them can leak information from an evaluation window:
+battery capacity (kWh), battery nominal power (kW), PV nominal power (kW), heating and
+cooling heat-pump nominal power (kW), DHW heater nominal power (kW), DHW tank capacity
+(kWh), heating efficiency (dimensionless). They are z-scored per column so no
+large-magnitude column dominates the distance. A test asserts none of them is constant
+across buildings — the old feature vector was `[battery capacity, 150.0]`, and the second
+entry contributed nothing.
+
+**Bandwidth.** `GraphConfig.sigma_f = None` now selects the median heuristic: sigma_f is
+set so the median off-diagonal squared feature distance maps to exp(−1) ≈ 0.368. A fixed
+bandwidth has no meaning independent of how the features are scaled, which is how
+sigma_d = 1.0 came to produce a 2.4e-3 spread. On the Travis eight the heuristic picks
+sigma_f = 2.8604.
+
+**Edge-weight spread, 56 off-diagonal edges, 8 buildings.**
+
+| | min | max | **spread** | mean | std |
+|---|---|---|---|---|---|
+| before, positional half-weight alone | 0.497556 | 0.499950 | **2.394e-03** | — | — |
+| before, full adjacency (positional + old features) | 0.802466 | 0.999870 | **0.197404** | 0.929133 | 0.064515 |
+| **after, `mode="feature"`** | 0.040744 | 0.838355 | **0.797610** | 0.392925 | 0.204998 |
+| after, `mode="mean_pool"` (the ablation) | 1.0 | 1.0 | 0.0 | 1.0 | 0.0 |
+
+The positional spread reproduces the audit's 2.4e-3 exactly. The full old adjacency was
+not quite as degenerate as the positional half alone — the min-max-scaled battery
+capacity did vary — but it still sat at a mean of 0.93 with a standard deviation of 0.06,
+i.e. within 7% of uniform. The feature graph spans 0.04 to 0.84.
+
+### 6.2 `mode="mean_pool"` ablation arm registered
+
+`ARMS["rl+calibrated+meanpool"]` is identical to `rl+calibrated` in policy, barrier,
+residual, penalty, EV request, forced penalty, EV floor and control mask, and differs
+only in `graph_mode`. A test asserts that field-by-field, so the contrast isolates the
+GCN. With the fabricated positional term gone, this is the honest test of whether the
+graph earns its place: if `rl+calibrated` does not beat `rl+calibrated+meanpool`, the GCN
+is a mean pool with extra parameters and the paper should say so.
+
+`Arm` gained a `graph_mode` field (default `"feature"`) and `build_controller` sets
+`config.graph.mode` from it.
+
+### 6.3 History window is primed, not zero-filled (B7)
+
+`HistoryBuffer.prime(obs_list)` fills the whole window with the episode's first
+observation; `experiments/runner.py` (both the training and the evaluation loop) and
+`experiments/diagnostics/ev_rl_requests.py` call it immediately after `env.reset()`
+instead of `update`.
+
+**Why.** The buffer was zero-filled at construction and pushed one observation per step,
+so for the first `window_size - 1` steps of every episode the transformer attended over a
+window that was mostly the *normalised value of zero* — not a missing-data token, but a
+spurious observation that normalises to whatever `-mean/std` happens to be. On a 14-day
+episode with a 24-step window that is 23 of 336 steps, 7% of the episode, and it is the
+stretch where the running normaliser is least calibrated (audit B7). Repeating the first
+observation is constant extrapolation: the window says "nothing has changed yet", which
+is true at t = 0, rather than "every signal was zero", which is false for a temperature
+in °C or a state of charge.
+
+**Evidence.** `test_history_prime_fills_the_window_with_the_first_observation`,
+`test_a_primed_window_contains_no_spurious_zeros` (counts the zeros: `B*(W-1)*D` under
+the old call, 0 under the new one), `test_priming_then_stepping_still_slides_the_window`.
+
+**This changes learned behaviour.** Every learning arm sees a different first-23-step
+observation window from now on, so new runs are not bit-comparable with the stored
+records. No stored record was altered.
+
+### 6.4 Test inventory updated deliberately
+
+`tests/test_experiments.py::test_the_ablation_arms` is an explicit inventory of `ARMS`
+and fails whenever an arm is added. It was updated to include
+`rl+calibrated+meanpool` and to assert the `graph_mode` of both it and `rl+calibrated`.
+Recording it here because the standing rule is that a test is not edited to accommodate a
+change without saying so: in this case the test's whole purpose is to force exactly this
+acknowledgement, and it will be updated once more in step 8.
+
+---
+
+## Step 7 — Batch the GCN forward pass (audit F)
+
+**What.** `STEncoder.batch_forward` ran `for n in range(N): h_nb[n] = self.spatial_gcn(x_nb[n], adj)`
+— N separate three-layer GCN calls per update, each of which also rebuilt the normalised
+adjacency from scratch inside every layer. `GCNConv.forward` now relies on
+`adj_norm @ x` broadcasting over a leading batch axis, so the same code path serves `(B, C)`
+and `(N, B, C)` and the loop is gone. A new `normalised_adjacency(adj)` helper computes
+D^(-1/2)(A+I)D^(-1/2) once and caches it on the tensor; the adjacency is fixed for a run,
+and it was being recomputed 3·N times per update.
+
+**Numerical equivalence.** Not an approximation: the GCN is linear in the node axis and
+the adjacency is shared, so the batched form is the same arithmetic.
+`tests/test_encoder_batching.py` keeps the pre-fix loop verbatim as `_loop_reference` and
+asserts agreement to `atol=1e-5, rtol=0`. Measured maximum absolute difference over all
+shapes tested: **2.38e-07**. Ten cases cover N×B of (1,2), (7,3), (33,8) at three seeds,
+the N=1 agreement between `forward` and `batch_forward`, gradient flow through the
+batched path, and symmetry plus caching of the normalised adjacency.
+
+**Speed-up, 8 buildings, 30 observations, 24-step window, 4 threads.**
+
+| what is measured | N = 336 (14 d) | N = 672 (28 d) | N = 8760 (1 y) |
+|---|---|---|---|
+| GCN stage alone, loop → batched | 11.5 → 0.2 ms (**57x**) | — | 301.1 → 9.0 ms (**33x**) |
+| whole `batch_forward` | 27.8 → 11.1 ms (2.5x) | 51.4 → 34.2 ms (1.5x) | 695.6 → 501.7 ms (1.4x) |
+| one PPO-Lagrangian update | 1.26 → 0.97 s (1.30x) | 2.81 → 2.10 s (1.34x) | — |
+
+**Dispute: the audit overstates this one.** It says "training cost is dominated by
+`STEncoder.batch_forward`'s Python loop" and that batching it "should make 5 seeds × 8
+scenarios cost roughly what 2 seeds cost now" — which would need a 2.5x end-to-end
+saving. The GCN loop was 43% of `batch_forward` at N = 8760 (301.1 ms of 695.6 ms); the
+temporal transformer is the rest, and `batch_forward` is itself only part of an update.
+At the level that matters — one PPO update — the measured saving is **1.30–1.34x**, not
+2.5x. The change is still worth having, it is free of numerical risk, and it removes an
+O(N) Python loop from the inner training path. But a five-seed grid will cost roughly
+3.8 times a two-seed grid, not 2.5, and the budget should be planned on that. If more
+is needed, the transformer is where to look next.

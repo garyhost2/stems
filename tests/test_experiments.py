@@ -160,13 +160,16 @@ def test_the_ablation_arms():
         "rl+calibrated+floor": ("rl", "calibrated"),
         "hp-shift": ("hp-shift", "none"),
         "rl-hp": ("rl", "none"),
+        "rl+calibrated+meanpool": ("rl", "calibrated"),
     }
     assert [n for n, a in ARMS.items() if a.learns] == [
         "rl", "rl+basic", "rl+linear", "rl+calibrated", "rl-res+calibrated", "rl+calibrated+pen",
-        "rl+calibrated+own", "rl+calibrated+floor", "rl-hp"]
+        "rl+calibrated+own", "rl+calibrated+floor", "rl-hp", "rl+calibrated+meanpool"]
     assert ARMS["rl-res+calibrated"].residual and ARMS["rl+calibrated+pen"].penalty > 0
     assert ARMS["rl+calibrated+own"].forced_penalty > 0 and ARMS["rl+calibrated"].forced_penalty == 0
     assert ARMS["rl-hp"].control == ("cooling_or_heating_device",)
+    assert ARMS["rl+calibrated+meanpool"].graph_mode == "mean_pool"
+    assert ARMS["rl+calibrated"].graph_mode == "feature"
 
 
 @pytest.fixture(scope="module")
