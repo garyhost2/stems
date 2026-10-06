@@ -166,10 +166,25 @@ def test_the_ablation_arms():
         "hp-shift": ("hp-shift", "none"),
         "rl-hp": ("rl", "none"),
         "rl+calibrated+meanpool": ("rl", "calibrated"),
+        # The nine comparison controllers, built by CHANGELOG.md steps 1-3. All carry
+        # barrier="calibrated" so each sees the identical exact-inverse safety layer.
+        "sac": ("sac", "calibrated"),
+        "dmappo": ("dmappo", "calibrated"),
+        "mpc": ("mpc", "calibrated"),
+        "mpc-oracle": ("mpc-oracle", "calibrated"),
+        "maddpg": ("maddpg", "calibrated"),
+        "marlisa": ("marlisa", "calibrated"),
+        "madcq": ("madcq", "calibrated"),
+        "metaems": ("metaems", "calibrated"),
+        "mappo-cc": ("mappo-cc", "calibrated"),
     }
     assert [n for n, a in implemented.items() if a.learns] == [
         "rl", "rl+basic", "rl+linear", "rl+calibrated", "rl-res+calibrated", "rl+calibrated+pen",
-        "rl+calibrated+own", "rl+calibrated+floor", "rl-hp", "rl+calibrated+meanpool"]
+        "rl+calibrated+own", "rl+calibrated+floor", "rl-hp", "rl+calibrated+meanpool",
+        "sac", "dmappo", "maddpg", "marlisa", "madcq", "metaems", "mappo-cc"]
+    # The model-predictive pair is implemented but does not learn: it re-solves an
+    # optimisation at every control step and has no parameters to fit.
+    assert implemented["mpc"].learns is False and implemented["mpc-oracle"].learns is False
     assert ARMS["rl-res+calibrated"].residual and ARMS["rl+calibrated+pen"].penalty > 0
     assert ARMS["rl+calibrated+own"].forced_penalty > 0 and ARMS["rl+calibrated"].forced_penalty == 0
     assert ARMS["rl-hp"].control == ("cooling_or_heating_device",)
