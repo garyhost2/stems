@@ -143,12 +143,16 @@ def test_environment_refuses_to_shorten_the_simulation():
 
 
 def test_the_ablation_arms():
-    # Scoped to the arms that have a builder. The 24 names pre-registered for the
-    # baseline and constraint tracks (step 8) have no builder yet and are inventoried
-    # by tests/test_preregistered_arms.py instead; mixing them in here would make this
+    # Scoped to the arms that have a builder. The eight comparison controllers
+    # pre-registered for the baseline track have no builder yet and are inventoried by
+    # tests/test_preregistered_arms.py instead; mixing them in here would make this
     # test a list of things that do not run.
+    #
+    # The constraints track added sixteen: the twelve-cell mechanism cross (audit C2),
+    # two hard-comfort arms (C1) and two degradation arms (C1). They are listed here
+    # because they now run.
     implemented = {n: a for n, a in ARMS.items() if a.implemented}
-    assert {n: (a.policy, a.barrier) for n, a in implemented.items()} == {
+    expected = {
         "idle": ("idle", "none"),
         "idle+calibrated": ("idle", "calibrated"),
         "rbc": ("rbc", "none"),
@@ -177,14 +181,31 @@ def test_the_ablation_arms():
         "madcq": ("madcq", "calibrated"),
         "metaems": ("metaems", "calibrated"),
         "mappo-cc": ("mappo-cc", "calibrated"),
+        "rl+calibrated+comfort": ("rl", "calibrated"),
+        "rbc+calibrated+comfort": ("rbc", "calibrated"),
+        "rl+calibrated+degr-throughput": ("rl", "calibrated"),
+        "rl+calibrated+degr-dod": ("rl", "calibrated"),
     }
-    assert [n for n, a in implemented.items() if a.learns] == [
+    expected.update({f"mech-{m}+{p}": ("rl", b)
+                     for m in ("none", "lagrangian", "projection", "both")
+                     for p, b in (("uniform", "basic"), ("linear", "linear"),
+                                  ("exact", "calibrated"))})
+    assert {n: (a.policy, a.barrier) for n, a in implemented.items()} == expected
+    learning = [n for n, a in implemented.items() if a.learns]
+    assert learning == [
         "rl", "rl+basic", "rl+linear", "rl+calibrated", "rl-res+calibrated", "rl+calibrated+pen",
         "rl+calibrated+own", "rl+calibrated+floor", "rl-hp", "rl+calibrated+meanpool",
-        "sac", "dmappo", "maddpg", "marlisa", "madcq", "metaems", "mappo-cc"]
+        "sac", "dmappo", "maddpg", "marlisa", "madcq", "metaems", "mappo-cc",
+        *[f"mech-{m}+{p}" for m in ("none", "lagrangian", "projection", "both")
+          for p in ("uniform", "linear", "exact")],
+        "rl+calibrated+comfort",
+        "rl+calibrated+degr-throughput", "rl+calibrated+degr-dod"]
     # The model-predictive pair is implemented but does not learn: it re-solves an
     # optimisation at every control step and has no parameters to fit.
     assert implemented["mpc"].learns is False and implemented["mpc-oracle"].learns is False
+    # The rule-based comfort arm must stay non-learning: it exists to attribute the
+    # barrier separately from the policy.
+    assert "rbc+calibrated+comfort" not in learning
     assert ARMS["rl-res+calibrated"].residual and ARMS["rl+calibrated+pen"].penalty > 0
     assert ARMS["rl+calibrated+own"].forced_penalty > 0 and ARMS["rl+calibrated"].forced_penalty == 0
     assert ARMS["rl-hp"].control == ("cooling_or_heating_device",)

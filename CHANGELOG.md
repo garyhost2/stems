@@ -1225,3 +1225,494 @@ names keep its run records separable from the causal arm's.
 * **`MARLISA`, `MADCQ` and `MetaEMS` are named variants, not reproductions.** Their
   defining sources could not be verified against `docs/LITERATURE.md`; what was
   implemented is described above and must be reported under those descriptions.
+# Constraints track — branch `methods/constraints`
+
+Audit finding ids refer to `docs/AUDIT_2026-10-06.md` §4C. The starting point was that
+only two constraints are genuinely hard in the running code — the battery
+state-of-charge band and the district import cap — that comfort is a soft reward term,
+that the per-building power cap is Lagrangian-only, that degradation and transformer
+limits do not exist, and that the Lagrangian is vestigial in the arms actually run
+because the exact barrier drives its cost to zero.
+
+**Test floor on entry.** `python -m pytest tests/ -q` in this worktree, before the first
+edit: **404 passed, 15 skipped, 1 warning, 0 failed** (419 collected, 123.76 s). The
+brief states the floor as "419 passing"; 419 is the collected count, and the 15 skips
+are all one cause — the CityLearn EV dataset
+`citylearn_challenge_2022_phase_all_plus_evs` is not present on this machine, so every
+test in `tests/test_env_widening.py` and `tests/test_ev_real.py` that needs it skips
+with `EV dataset unavailable: RuntimeError("Schema ... not found")`. No test fails, and
+nothing in this track touches that code path. The floor carried forward is therefore
+**404 passed / 15 skipped / 0 failed**, and every step below is measured against it.
+
+---
+
+## Step 1 — Thermal comfort as a deadline-storage constraint, behind a flag
+
+### 1.1 `stems/comfort.py`: the building envelope as a `(store, rate, required level, deadline)` device
+
+**What.** A new module with three objects.
+
+`RCThermalModel` is a first-order lumped-capacitance envelope,
+`C dT_in/dt = UA (T_out − T_in) + Φ + Φ_g`, discretised at the control step. Every
+parameter is SI and per building: `C` [J/K], `UA` [W/K], `Φ_g` [W], `dt` [s]. It ships
+**no default parameter values** and refuses `C < 1e5 J/K` or `UA < 1 W/K` — a hard
+thermal constraint built on an invented capacitance is a guarantee about nothing.
+`RCThermalModel.identify` fits `(C, UA, Φ_g)` per building by ordinary least squares on
+logged `(T_in, T_out, Φ)` and returns an `RCThermalFit` (R², one-step RMSE in K, sample
+count, time constant τ = C/UA in hours) alongside the model, so the fit quality is
+reported rather than assumed.
+
+`ThermalComfortBarrier` subclasses `stems.deadline.DeadlineStorageBarrier` — the same
+class the hot-water tank, the house battery and the electric vehicle instantiate, so
+the framework claim is structural and a test asserts the `isinstance`. The store is the
+zone's sensible heat, the rate limit is the heat pump's per-step temperature gain at
+full action, the required level is the set-point band less a tolerance θ, and the
+deadline is the current step at every occupied step. One instance per side of the band:
+`direction=+1` raises the heat-pump action towards the heating floor, `direction=−1`
+lowers it towards the cooling ceiling.
+
+The barrier's state is the temperature **predicted one step ahead with the heat pump
+off**. That matters: the free-running drift is then outside the controllable part, the
+delivered temperature change is exactly linear in the action, and the base class's
+`action_for_soc_gain` is exact rather than a linearisation.
+
+`build_comfort_barriers` is the gate. It is **off by default** (`ComfortConfig.enabled
+= False`) and refuses, with a specific reason, four configurations in which it could
+not actually bound a temperature: no heat-pump action; `hvac_control="setpoint"`; no
+heating set point in the observation vector; and no `RCThermalModel` supplied.
+
+**Why `hvac_control="setpoint"` is refused.** Under the set-point mode — which is
+`experiments/scenario.py::Scenario`'s default — the heat-pump action column is a
+±1.5 °C set-point offset and `stems/environment.py::thermostat_step` issues the power
+command through an integral loop the controller does not command. Projecting that
+column cannot bound a temperature. This is the same dimensional error already
+documented for `CBFShield._apply_hvac_power_guard`; it is refused here rather than
+repeated.
+
+**Why the barrier is off on CityLearn, measured.** Two findings, both from this track:
+
+1. Identifying the envelope from the **dataset's own series** — `energy_simulation.
+   indoor_dry_bulb_temperature`, the weather file's outdoor temperature, and the
+   recorded heating and cooling demands — returns a **non-physical fit**. On
+   `citylearn_schemas/tx_travis_8b`, winter training window, building 0:
+   `a = −2.158e−3 K/K per step` and `b = −5.880e−5 K/W per step`, i.e. negative `UA`
+   and negative `C`. The cause is that CityLearn's dataset reports the *ideal thermal
+   load* needed to hold the set point, not delivered power against a free-running
+   temperature, so the pair is not an input-output pair for an envelope at all.
+   `identify_from_citylearn` raises instead of clipping the fit, and a test pins the
+   raise.
+2. Identifying it from an **open-loop excitation rollout** — the heat-pump action
+   driven with an independent ±1/0 random signal per building, the *simulated*
+   temperature recorded, 672 steps, seed 0, same scenario — returns a signed-physical
+   but quantitatively useless envelope:
+
+   | quantity | across the 8 buildings |
+   |---|---|
+   | `C` | 13.55 – 103.94 MJ/K |
+   | `UA` | 779.8 – 7937.6 W/K |
+   | `τ = C/UA` | 2.27 – 5.68 h |
+   | R² on ΔT_in | 0.303 – 0.613 |
+   | one-step RMSE | **4.231 – 8.894 K** |
+
+   A one-step residual of 4–9 K against a 2 K comfort tolerance means the model's own
+   error is two to four times the bound it would enforce. A `UA` of 7.9 kW/K is also
+   not a dwelling. This is the quantitative version of `docs/REPORT_2026-10.md` §2
+   ("−0.25 cooling in winter lowers it 4–13 °C, which is not physical"; "one house's
+   model does not respond to cooling in autumn at all"), and it is the reason comfort
+   stays a soft reward term here and **no hard-comfort claim is made on CityLearn**.
+
+**Why the design is nonetheless standard.** `docs/LITERATURE.md` (Thermal comfort row)
+records that in the optimisation literature hard comfort is normal practice:
+[panagi2026thermal] embeds a calibrated 3R2C grey-box thermal model in a
+network-constrained optimal power flow "while explicitly enforcing thermal comfort,
+Distributed Energy Resource (DER) limits, and full power flow physics". The condition
+is a physical model one trusts. `identify_from_rollout` is the function that supplies
+one the day real measurements exist — the same call, the same barrier, the same arms,
+with a fit summary that can be inspected before the claim is made.
+
+**Evidence.** `tests/test_comfort_barrier.py`, 22 cases. The identification recovers
+`C`, `UA` and `Φ_g` from data generated by a known model to `rtol=1e-6`, `1e-6` and
+`1e-4` with R² > 0.999; it refuses a non-physical fit; the barrier is a
+`DeadlineStorageBarrier`; `gap × capacity` is the zone's missing sensible heat
+`C ΔT / 3.6e6` in kWh and `energy_still_required_kwh` divides it by the coefficient of
+performance to give electrical kWh; the projected heating action lands the predicted
+temperature exactly on the floor (`atol=1e-4 K`) and the cooling action exactly on the
+ceiling; the barrier only ever raises a heating action and never lowers it; over 200
+randomised band and temperature draws the two sides never bind together; and each of
+the five refusals raises with its own message. End-to-end on the real simulator:
+`tests/test_constraint_mechanisms.py::test_the_comfort_arm_runs_end_to_end_against_an_identified_envelope`
+and `::test_the_dataset_route_refuses_rather_than_returning_a_wrong_envelope`.
+
+### 1.2 Two comfort KPIs, reported separately
+
+**What.** `MetricsCalculator` gained `comfort_barrier_binding_rate` (how often the
+barrier had to intervene) and `comfort_band_breach_rate` (how often the band broke
+anyway, despite it).
+
+**Why.** They are different facts and collapsing them would hide the one that matters:
+a hard constraint whose breach rate is not zero is not hard. Reporting both is how the
+simulation-only status of the guarantee stays visible in the run record.
+
+**Evidence.** `tests/test_constraint_mechanisms.py::test_the_comfort_arm_runs_end_to_end_against_an_identified_envelope`
+asserts both keys are present and that the breach rate is a rate.
+
+---
+
+## Step 2 — Battery and electric-vehicle degradation, priced and constrainable
+
+### 2.1 `stems/degradation.py`: capacity fade in kWh, with every parameter sourced
+
+**What.** `battery_equivalent_full_cycles` was a count the repository produced and never
+priced. It is now accompanied by a quantity with units — kWh of lost storage capacity —
+computed by `DegradationModel` and `DegradationAccountant` and reported next to it.
+
+Three terms, each with its source.
+
+**Throughput.** `ΔQ_thr,t = κ · Q_rated · |E_t| / (2 · Q_t)` [kWh]. This is
+*character-for-character the expression CityLearn itself applies*:
+`citylearn/energy_model.py::Battery.degrade` in 2.6.0b1 returns
+`capacity_loss_coefficient * capacity * abs(energy_balance[time_step]) / (2 *
+max(degraded_capacity, ZERO_DIVISION_PLACEHOLDER))`. Using it means the reward prices
+exactly what the plant does rather than a second, disagreeing model. `κ` is read per
+building off the simulator's own `Battery` objects through the new
+`STEMSEnvironment.battery_degradation_info()`. On `citylearn_schemas/tx_travis_8b` the
+eight values are `6.09e−5, 3.18e−5, 7.32e−5, 4.46e−5, 6.78e−5, 3.49e−5, 3.66e−5,
+9.08e−5` — inside CityLearn's own documented default range `(1e−5, 1e−4)` (same file,
+`Battery` docstring and the `capacity_loss_coefficient` setter). The factor two makes
+`κ` the fade per *equivalent full cycle*, one such cycle being `2 Q_rated` of
+throughput; a test checks that arithmetic directly. The same call also exposes
+`depth_of_discharge`, which on that schema is `0.9, 1.0, 0.85, 1.0, 1.0, 0.9, 0.9, 1.0`.
+
+**Depth of discharge.** Cycle life falls with cycle depth, so fade per unit of
+throughput rises with it. Writing `N(δ) = N_ref δ^−(p+1)` gives a multiplier `δ^p` on
+the throughput fade accumulated inside a closed half cycle. **`p` defaults to 0.0,
+which reproduces the throughput model exactly.** That default is deliberate: no value
+of `p` is asserted anywhere in this repository, because none was verified. The standard
+empirical reference for the shape is Xu, Oudalov, Ulbig, Andersson and Kirschen,
+"Modeling of Lithium-Ion Battery Degradation for Cell Life Assessment", IEEE
+Transactions on Smart Grid, DOI `10.1109/TSG.2016.2578950`. Its title and DOI resolved
+through Crossref; the paper is **closed access** (Unpaywall, Semantic Scholar and PMC
+all returned no open-access location) and **its fitted stress-function coefficients
+were not read**, so none are reproduced here. Setting `p` to a non-zero value is a
+modelling choice whoever sets it must source.
+
+**Calendar.** `ΔQ_cal,t = c_cal · Q_rated · dt`, `c_cal` in 1/s. No default: calendar
+fade depends on chemistry, temperature and mean state of charge, none of which the
+simulator reports. Off unless supplied.
+
+**Pricing.** `π_deg` [currency per kWh of lost capacity], default 0.0 — fade is
+measured and reported but does not enter the reward. A replacement cost is a market
+number belonging to the scenario, so it is a `Scenario` field
+(`degradation_price_per_kwh`), not a constant in the code. When set, the penalty is
+`π_deg · ΔQ_t`, in the same currency per kWh as the tariff, so the degradation cost and
+the electricity bill are additive.
+
+**Constraint.** The episode carries a per-building capacity-loss budget `L` [kWh]
+(`Scenario.degradation_limit_kwh_per_episode`). The per-step cost signal is
+`1{ΔQ_t > L / T}` for a `T`-step episode. That is the same per-step 0/1 indicator shape
+as the three existing channels, which is what lets the same cost critics carry it with
+no change to the critic, the generalised-advantage estimator or the multiplier update.
+
+### 2.2 Half cycles are closed by a hysteresis-filtered reversal detector
+
+**What.** The depth term needs a cycle depth. Rather than rainflow counting, which is
+not causal, the accountant tracks the state of charge at which the open excursion
+started and the extreme reached since; a retracement smaller than
+`reversal_threshold` (0.05 state-of-charge units, a repository choice, reported in every
+run record) does not close anything, and a larger one closes a half cycle of that depth.
+
+**Why, and this was found by measuring.** The first implementation closed a half cycle
+on every sign change. On a two-day winter window the policy's state of charge jitters
+every step, so it produced half cycles of mean depth `4.07e−4` — and with `p = 0.5`
+the `δ^p` multiplier then discounted the fade by about 98%. Without the range gate the
+depth term *rewards* jitter, which is the exact opposite of its purpose. The gate is
+the standard range filter applied ahead of rainflow counting. It is an approximation to
+rainflow, not rainflow, and a result that leans on `p > 0` should say so.
+
+### 2.3 Honest placement: this is ahead of the field, not a reproduction of it
+
+**What.** Stated here and in the module docstring rather than left for a reviewer to
+notice.
+
+**Why.** `docs/LITERATURE.md` records that in **every source the literature track
+retrieved**, degradation is a scored KPI and never an enforced constraint;
+[khouja2026characterizing] proposes "battery storage lifetime" explicitly as a *novel*
+KPI, which is itself evidence that it was neither standard nor enforced. Wiring it as a
+constraint is therefore a contribution to be defended, not a convention to be cited.
+`docs/LITERATURE.md` §8 also notes that battery degradation modelling was not searched
+as its own area, so the literature position above is provisional on that search.
+
+Separately: the audit's one citation for a vehicle-to-grid degradation term, **Khezri
+et al. 2024, did not resolve** against Crossref (`docs/LITERATURE.md` §8.1) and was
+struck. It is **not** cited in `stems/degradation.py`, in this changelog, or anywhere
+else in this track.
+
+**Evidence.** `tests/test_degradation.py`, 18 cases. The throughput term is checked
+against a local re-implementation of CityLearn's literal expression over a four-step
+state-of-charge path to `rtol=1e-12`; two full state-of-charge sweeps cost exactly `κ`
+of rated capacity to `rtol=2e-4`; `κ` read from an environment is asserted to lie in
+`(1e−5, 1e−4)` and to carry its CityLearn provenance string; `p = 0` reproduces the
+throughput total to `rtol=1e-9` over a 400-step random walk, which is also the proof
+that every unit of throughput is committed exactly once and the depth term cannot
+double-count; one 0.8-deep round trip costs strictly more than eight 0.1-deep round
+trips of the same total throughput at `p = 1`; the range gate holds a jittery 0.1→0.9
+climb to at most two closed half cycles instead of one per wiggle; calendar ageing
+charges `c_cal · Q_rated · dt` with no throughput at all; the price defaults to zero;
+the constraint channel is a `(B,)` 0/1 array; and the fade KPIs appear next to
+`battery_equivalent_full_cycles` in `MetricsCalculator.compute_all`. End-to-end:
+`tests/test_constraint_mechanisms.py::test_the_degradation_arm_runs_end_to_end_and_reports_fade`.
+
+---
+
+## Step 3 — A second constrained-RL family, and the fate of the learned filter
+
+### 3.1 FOCOPS against the same cost critics
+
+**What.** `stems/agent.py` gained `STEMSAgent.focops_advantage` and
+`STEMSAgent._focops_loss`, selected by `LagrangianConfig.algorithm` ∈
+`{"ppo-lagrangian", "focops"}` (`CONSTRAINED_ALGORITHMS`). FOCOPS — First Order
+Constrained Optimization in Policy Space, Zhang, Vuong and Ross, NeurIPS 2020 — moves
+the policy towards the non-parametric optimum `π* ∝ π_k exp((A − ν A_C)/τ)` by
+first-order descent on `KL(π_θ ‖ π*)`, giving the surrogate
+
+```
+L = E_{a~π_k} [ ( KL(π_θ‖π_k)[s] − (1/τ) r(θ) (A − ν A_C) ) · 1{KL ≤ δ} ]
+```
+
+**Why FOCOPS and not CPO.** CPO needs a conjugate-gradient solve of the Fisher system
+and a backtracking line search per update, i.e. a second-order machinery that shares
+nothing with the existing first-order Adam path. FOCOPS is first-order, so it reuses
+the identical optimiser, encoder and critics, and the comparison is between surrogates
+rather than between optimisers.
+
+**What is shared, deliberately.** The same `CostCritic` ensemble, the same width, the
+same generalised-advantage estimates, the same encoder, the same standardisation of the
+reward and cost advantages, the same multiplier state tensors, the same minibatching
+and the same value and entropy losses. `focops_advantage` differs from
+`effective_advantage` by exactly the missing `1/(1 + Σν_k)` denominator — a test asserts
+`focops / (1 + Σν) == lagrangian` to `atol=1e-6` — because FOCOPS divides by its
+temperature `τ` instead. The trust region `δ` defaults to `TrainingConfig.target_kl`
+(0.02), the same threshold PPO already uses for early stopping, so the two families
+operate in trust regions of the same size and the comparison is not confounded by it.
+
+**Two deviations, stated rather than hidden.** (a) `π_k`'s distribution parameters are
+not in the buffer — only its log-probabilities are — so `KL(π_θ‖π_k)` is estimated with
+the standard non-negative, differentiable estimator `E[r log r − (r − 1)]` rather than
+in closed form. (b) The published FOCOPS updates `ν` by plain projected gradient; here
+`ν` is updated by whatever `LagrangianConfig` says, which defaults to this repository's
+PID controller. That keeps the *only* difference between the two arms the actor
+surrogate, which is what the brief asks for; setting `use_pid=False` recovers the
+published update, and a run that wants the published algorithm should.
+
+### 3.2 What our cost critics actually measure, named
+
+**What.** `stems/config.py` now carries `BASE_CONSTRAINT_CHANNELS` with the definition
+written next to it, and `constraint_channel_names(config)` as the one source of truth
+for the channel list, its order and the critic width.
+
+Every channel is a **per-step 0/1 indicator, evaluated per building**:
+
+| channel | indicator |
+|---|---|
+| `soc_band` | `1{state of charge after the step outside [SOC_min, SOC_max]}` |
+| `building_power_cap` | `1{|net electricity consumption| > P_building_max}` |
+| `district_import_cap` | `1{Σ_b max(net_b, 0) > P_grid_max}`, identical for every b |
+| `battery_degradation` | `1{ΔQ_t > L/T}`, present only when a budget is set |
+
+So the quantity the cost critics estimate is a **discounted expected fraction of
+violating steps** (GAE with γ = 0.99, λ = 0.95 on those indicators), and the quantity
+the PID controller compares against `cost_limit` is the **undiscounted mean of the
+indicators over the batch and over buildings**. In the three incompatible definitions
+the literature track found — average episodic cost against a limit, fraction of
+violating steps, and fraction of episodes with any violation — ours is the **fraction
+of violating building-steps**. The literature track established that no common protocol
+exists across the constrained-RL papers and that the three are not interconvertible, so
+this definition has to travel with every number we report. `MetricsCalculator`'s
+`safety_violation_rate`, `soc_violation_rate`, `power_violation_rate` and
+`grid_violation_rate` are the same fraction measured on the evaluation rollout, which
+is why they are comparable with the training-time cost at all.
+
+Note the one asymmetry a reader should know about: `district_import_cap` is a district
+quantity broadcast to every building, so a violating step contributes `B` violating
+building-steps to that channel while a single building's `soc_band` violation
+contributes one. The channels are therefore comparable across *arms* but not across
+*channels*.
+
+### 3.3 `NeuralSafetyFilter` removed
+
+**What.** Deleted from `stems/cbf.py`, with the argument left in a comment at the site.
+`import torch` and `import torch.nn as nn` went with it; they had no other user in that
+module.
+
+**Why remove rather than train it against the LP shield.** Three reasons.
+
+1. **It can only lose on the axis we report.** A learned regression onto the shield's
+   output carries no certificate that its output lies in the safe set. The repository's
+   constraint claim is that the projection is *exact* against the simulator's own plant
+   model; replacing it with an approximation can only raise the violation rate, and
+   there is nothing it can win back.
+2. **There is no cost to amortise.** A learned safety filter earns its place when it
+   replaces an expensive online optimisation. Here the exact battery inverse is a
+   24-iteration bisection on a scalar (`BatteryModel.safe_interval`) and the only
+   optimisation in the loop is the fleet LP, which the filter was not written to
+   replace. Trained, it would be a slower, less accurate version of a microsecond
+   closed form.
+3. **It did not implement its own interface.** `num_ensemble=5` and
+   `uncertainty_threshold=0.05` are parameters of an ensemble-with-uncertainty-gate
+   mechanism; the class held one trunk and one head, built no ensemble, and never read
+   the threshold. Keeping it would have meant first fixing dead code to match its own
+   signature.
+
+**What this costs.** The brief's four constraint families become three: PID-Lagrangian,
+FOCOPS, and projection (the exact barrier plus the LP fleet shield, which covers both
+"safety layer / shielding" and "action projection"). That is still a comparison across
+mechanism families, and it is an honest one.
+
+**Evidence.** `tests/test_constraint_mechanisms.py`: both families registered and
+`ppo-lagrangian` the default; an unknown family raises; FOCOPS and PPO-Lagrangian share
+the cost-critic class, width and multiplier shapes; FOCOPS takes gradient steps on the
+mock and on the real simulator and reports `mechanism_algorithm == "focops"`; the KL
+estimate is exactly zero at the behaviour policy and non-negative away from it; the two
+advantage combinations differ by exactly the Lagrangian denominator; and
+`stems.cbf` no longer has the attribute, with a tree scan asserting nothing constructs
+it.
+
+---
+
+## Step 4 — The constraint-mechanism 2×2, wired
+
+### 4.1 The two mechanisms are decoupled
+
+**What.** `experiments/controllers.py::mechanism_switches(arm)` returns
+`(projection_on, lagrangian_on)`, and `build_controller` now reads both instead of
+inferring them. `projection_on` drives `STEMSAgent(use_cbf=...)`, the `ShieldedController`
+versus `PlainController` choice, **and the fleet shield** — the LP is a projection too,
+so a cell with the projection off must have no projection of any kind or the cross
+isolates nothing. `lagrangian_on` drives the new `LagrangianConfig.enabled`.
+
+| `mechanism` | projection | constrained policy |
+|---|---|---|
+| `auto` | `barrier != "none"` | the policy learns |
+| `none` | off | off |
+| `lagrangian` | off | on |
+| `projection` | on | off |
+| `both` | on | on |
+
+`"auto"` reproduces the historical coupling exactly, so all seventeen pre-existing arms
+are unchanged; a test asserts that for every one of them.
+
+**Why this was the missing ablation.** Today `rl` has the Lagrangian and no barrier
+while `rl+calibrated` has both, so neither isolates a mechanism (audit C2). The twelve
+cells `mech-{none,lagrangian,projection,both}+{uniform,linear,exact}` do, and a test
+asserts that the twelve `Arm` records are identical in every field except `barrier` and
+`mechanism` — so once the grid driver gives them a common `--episodes`, the constraint
+mechanism is the only thing that differs.
+
+**The one thing `enabled=False` must not switch off.** The cost critics keep training in
+every cell, including `mechanism="none"`. They are the instrument that measures the
+violation rate, and the cells have to measure it the same way to be comparable; what
+`enabled` removes is only their effect on the actor. Two tests pin this: the cost-value
+loss is non-zero in the `none` cell, and the multipliers do not move there while they do
+move in the `lagrangian` cell.
+
+### 4.2 Three of the twelve cells are the same controller — flagged, not hidden
+
+**What.** `Arm.mechanism_is_plant_sensitive` is `False` for `mech-none+*` and
+`mech-lagrangian+*`.
+
+**Why.** The battery plant model is consulted only by the projection. With the
+projection off, `mech-none+uniform`, `mech-none+linear` and `mech-none+exact` are the
+same controller under three names, and likewise for `mech-lagrangian+*`. The cross keeps
+all twelve so the factorial is complete and the grid driver needs no special case, but
+**six of the twelve cells are duplicates of two**, and running them at five seeds each
+would spend 30 runs to produce 10 runs' worth of information. The aggregation should
+collapse them. (A smaller correction while here: the step-8 comment in
+`experiments/controllers.py` said "the four with mechanism='none'"; the cross has three
+plant models, so it is three. Corrected in the comment.)
+
+### 4.3 Provenance of each run
+
+**What.** `run_one` now records `meta.mechanism` (the two switches),
+`meta.constraint_channels` (the channel list the collector actually produced),
+`meta.rc_model` and `meta.rc_fit` for a comfort arm, and `meta.degradation_model` for a
+degradation arm, and `meta.config` gained the `comfort` and `degradation` sections.
+`agent.update` returns `mechanism_algorithm`.
+
+**Why.** A 2×2 whose run records do not say which cell they came from is not a 2×2. The
+fit summary in particular has to be in the record: a comfort result is only readable
+next to the R² and RMSE of the envelope it was enforced against.
+
+### 4.4 The envelope is identified on the training window only
+
+**What.** When `arm.comfort_barrier`, `run_one` runs the excitation rollout on a
+**training-window** environment and passes the resulting `RCThermalModel` to both the
+training and the evaluation builds, through the new `build_controller(..., rc_model=)`.
+
+**Why.** Identifying it on the evaluation window would fit the constraint to the period
+it is scored on. This is the same time-based split rule the project applies to
+everything else.
+
+### 4.5 Cost-critic width is derived, never configured
+
+**What.** `build_controller` sets `config.lagrangian.num_constraints` from
+`constraint_channel_names(config)` *after* the degradation mode is resolved and *before*
+the agent is constructed; `experiments/runner.py::finalise_constraint_width` does the
+same for the collector and the run record.
+
+**Why, and this was a real bug caught in a smoke test.** The critic's output width is
+read at construction time. Deriving the channel list later built a three-output critic
+for a four-column cost array.
+
+### 4.6 Tests edited to accommodate these changes — recorded under the test-editing rule
+
+Three existing tests asserted that this work was *missing*. They now assert that it
+landed. Recording each, with why editing was the right move rather than a way around a
+failure:
+
+* `tests/test_preregistered_arms.py` asserted `implemented is False` and a
+  `NotImplementedError` for all 24 reserved names. Sixteen of them now have builders.
+  The reservation contract — the name resolves, reports unimplemented, and raises a
+  message longer than 120 characters saying what to build — is still asserted in full
+  over the eight comparison controllers that remain reserved for the baseline track,
+  and the sixteen that landed are asserted to have the opposite properties under a new
+  parametrised case. The alternative was to keep asserting that implemented work is
+  absent.
+* `tests/test_experiments.py::test_the_ablation_arms` is an inventory of arms that
+  build. It grew from 17 entries to 33, and its learning-arm list from 10 to 25. An
+  inventory that does not list new arms is not an inventory; it still fails the moment
+  an arm is added or changed without being declared.
+* `Arm.implemented` itself was narrowed from "no reserved policy **and** `mechanism ==
+  "auto"` **and** no comfort barrier **and** no degradation" to "no reserved policy".
+  The three extra conditions existed only to mark this track's work as absent.
+
+**Evidence.** `tests/test_constraint_mechanisms.py`, 40 cases, covering §§3 and 4; plus
+`tests/test_preregistered_arms.py` (48) and `tests/test_experiments.py` (42) as edited.
+
+---
+
+## Test floor after the constraints track
+
+`python -m pytest tests/ -q` on the final commit: **452 passed, 15 skipped, 1 warning,
+0 failed** (141.37 s), against the entry floor of 404 passed / 15 skipped / 0 failed.
+The 15 skips are the same missing-EV-dataset skips as on entry; the warning is the
+pre-existing `requires_grad` one in `tests/test_experiments.py`. Net **+48 passing, 0
+failing, nothing newly skipped**. The new cases are
+`tests/test_comfort_barrier.py` (22), `tests/test_degradation.py` (18) and
+`tests/test_constraint_mechanisms.py` (40, of which five drive the real simulator
+end to end); `tests/test_preregistered_arms.py` and `tests/test_experiments.py` were
+edited rather than added to, as recorded in step 4.6.
+
+## Not done, and why
+
+* **Nothing was trained.** Per the brief, this track makes the controllers exist, be
+  correct and be validated; the mechanism grid is a later phase.
+* **Transformer thermal limits** (the other half of audit C1's "do not exist") were not
+  implemented. `docs/LITERATURE.md` records transformer loss of life as a reported
+  *outcome* in [panagi2026thermal] and a genuine constraint only in
+  [botkinlevy2020distributed], where charging is coordinated "under nonlinear
+  transformer temperature ratings". A loading-history-dependent thermal limit needs a
+  transformer model and a network the CityLearn schema does not contain; the district
+  import cap is the only grid-side limit this testbed can support. Stated rather than
+  stubbed.
+* **No `p > 0` default for the depth-of-discharge term**, and no calendar-ageing rate.
+  Both would be unsourced numbers inside a constraint.

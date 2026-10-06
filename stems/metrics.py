@@ -69,6 +69,9 @@ class MetricsCalculator:
         control_indices: Optional[List[int]] = None,
         ev_layout: Optional[Dict[str, int]] = None,
         hours_per_step: float = 1.0,
+        degradation_model: Optional[Any] = None,
+        degradation_limit_kwh: Optional[float] = None,
+        comfort_barriers: Optional[List[Any]] = None,
     ) -> None:
         self.B = num_buildings
         self.cbf = cbf_config or CBFConfig()
@@ -82,6 +85,15 @@ class MetricsCalculator:
                                 if control_indices is not None else None)
         self.ev_layout = dict(ev_layout) if ev_layout is not None else None
         self.hours_per_step = float(hours_per_step)
+        self.degradation_model = degradation_model
+        self.degradation_limit_kwh = degradation_limit_kwh
+        self.comfort_barriers = list(comfort_barriers or [])
+        self._accountant = None
+        if degradation_model is not None:
+            from stems.degradation import DegradationAccountant
+
+            self._accountant = DegradationAccountant(
+                degradation_model, limit_kwh_per_episode=degradation_limit_kwh)
         self.reset()
 
     def reset(self) -> None:
@@ -107,6 +119,10 @@ class MetricsCalculator:
         self._ev_missed = 0
         self._ev_shortfall_kwh = 0.0
         self._ev_events: Optional[List[Dict[str, float]]] = None
+        self._comfort_binding_list: List[np.ndarray] = []
+        self._comfort_breach_list: List[np.ndarray] = []
+        if getattr(self, "_accountant", None) is not None:
+            self._accountant.reset()
 
     def add_step(
         self,
@@ -149,6 +165,28 @@ class MetricsCalculator:
                 self._ev_departures += int(left.sum())
                 self._ev_missed += int((left & (gap > _EV_TOL)).sum())
                 self._ev_shortfall_kwh += float((gap * cap)[left].sum())
+
+        if self._accountant is not None:
+            self._accountant.step(extract(obs_list, _IDX_SOC_ELEC),
+                                  extract(next_obs_list, _IDX_SOC_ELEC))
+
+        if self.comfort_barriers:
+            # Two separate questions, reported separately: how often the barrier *had*
+            # to intervene (binding), and how often the band was broken anyway despite
+            # it (breach). A hard constraint whose breach rate is not zero is not hard,
+            # and saying so is the point of measuring both.
+            binding, breach = [], []
+            for barrier in self.comfort_barriers:
+                u = barrier.urgency(obs_list)
+                binding.append(u["active"] & (u["gap"] > 0.0))
+                limit = barrier.limit_c(next_obs_list)
+                t_next = extract(next_obs_list, _IDX_T_IN)
+                over = (t_next < limit) if barrier.direction > 0 else (t_next > limit)
+                breach.append(u["active"] & over)
+            self._comfort_binding_list.append(
+                np.any(np.stack(binding), axis=0).astype(np.float32))
+            self._comfort_breach_list.append(
+                np.any(np.stack(breach), axis=0).astype(np.float32))
 
         if self.dhw_barrier is not None:
             r = self.dhw_barrier.readiness(obs_list)
@@ -309,6 +347,23 @@ class MetricsCalculator:
 
         throughput = np.abs(soc - pre_soc).sum(axis=0) / 2.0
         result["battery_equivalent_full_cycles"] = float(throughput.mean())
+
+        # Equivalent full cycles are a count; capacity fade is the same movement priced
+        # in kWh of storage the house no longer has. Reported next to each other so the
+        # count is never the only thing a reader sees (audit C1).
+        if self._accountant is not None:
+            self._accountant.flush()
+            result.update(self._accountant.kpis(prefix="battery"))
+            limit = self.degradation_limit_kwh
+            if limit is not None:
+                over = self._accountant.cumulative_loss_kwh > limit
+                result["battery_degradation_budget_exceeded_rate"] = float(over.mean())
+
+        if self._comfort_binding_list:
+            result["comfort_barrier_binding_rate"] = float(
+                np.stack(self._comfort_binding_list).mean())
+            result["comfort_band_breach_rate"] = float(
+                np.stack(self._comfort_breach_list).mean())
 
         actions_arr = np.stack(self._action_list, axis=0)
         days = max(T * dt / 24.0, 1e-9)

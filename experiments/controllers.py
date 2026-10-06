@@ -117,11 +117,29 @@ class Arm:
 
     @property
     def implemented(self) -> bool:
-        """False for an arm that is registered as a name but has no builder yet."""
-        return (self.policy not in PRE_REGISTERED_POLICIES
-                and self.mechanism == "auto"
-                and not self.comfort_barrier
-                and self.degradation == "none")
+        """False for an arm that is registered as a name but has no builder yet.
+
+        The constraint track filled in the mechanism cross, the hard-comfort arms and
+        the degradation arms, so `mechanism`, `comfort_barrier` and `degradation` no
+        longer make an arm unimplemented; only a reserved *policy* does. The eight
+        comparison controllers remain reserved for the baseline track.
+        """
+        return self.policy not in PRE_REGISTERED_POLICIES
+
+    @property
+    def mechanism_is_plant_sensitive(self) -> bool:
+        """Whether this arm's battery plant model can change its behaviour at all.
+
+        The plant model is only ever consulted by the projection. With the projection
+        switched off (`mechanism` in {"none", "lagrangian"}) the three plant variants of
+        the cross are the *same controller* under three names, and a grid that runs all
+        three pays three times for one result. Kept in the cross so the factorial is
+        complete and the driver needs no special case; flagged here so the aggregation
+        can collapse them.
+        """
+        if self.mechanism == "auto":
+            return self.barrier != "none"
+        return self.mechanism in ("projection", "both")
 
     @property
     def is_comparison(self) -> bool:
@@ -177,9 +195,13 @@ ARMS: Dict[str, Arm] = {a.name: a for a in (
     # (b) The constraint-mechanism 2x2 of audit C2, crossed with the battery plant
     #     model. `barrier` carries the plant model (basic = uniform rate, linear =
     #     linear from the exact parameters, calibrated = the exact inverse), and
-    #     `mechanism` says which mechanism is switched on. Twelve arms; the four with
-    #     mechanism="none" differ only in a projection that is switched off, and are
-    #     kept so the cross is complete and the grid driver does not need a special case.
+    #     `mechanism` says which mechanism is switched on. Twelve arms. The *three*
+    #     with mechanism="none" differ only in a projection that is switched off, and
+    #     so do the three with mechanism="lagrangian" -- six of the twelve are two
+    #     controllers under six names. (The step-8 comment said "four"; the cross has
+    #     three plant models.) They are kept so the factorial is complete and the grid
+    #     driver needs no special case; `Arm.mechanism_is_plant_sensitive` marks them
+    #     so the aggregation can collapse them instead of paying for them.
     *(Arm(f"mech-{mech}+{plant}", "rl", PLANT_MODELS[plant], mechanism=mech)
       for mech in ("none", "lagrangian", "projection", "both")
       for plant in ("uniform", "linear", "exact")),
@@ -443,6 +465,10 @@ def _refuse_unimplemented(arm: Arm) -> None:
     A pre-registered arm must not quietly fall through to some other branch and produce
     a run record that looks like a result. Each message names what has to be built and
     where the relevant code or audit finding is.
+
+    Only the eight comparison controllers are still reserved names; the constraint
+    track filled in the other sixteen. See CHANGELOG.md steps 1-4 of the constraints
+    track.
     """
     if arm.policy in PRE_REGISTERED_POLICIES:
         raise NotImplementedError(
@@ -450,30 +476,6 @@ def _refuse_unimplemented(arm: Arm) -> None:
             f"{arm.policy!r} needs a builder: {PRE_REGISTERED_POLICIES[arm.policy]}. "
             "Add the branch to experiments/controllers.py::build_controller; the arm "
             "name and its fields are already fixed so nothing downstream has to change.")
-    if arm.mechanism != "auto":
-        raise NotImplementedError(
-            f"arm {arm.name!r} is pre-registered, not implemented. It asks for "
-            f"mechanism={arm.mechanism!r} with the {arm.plant_model!r} battery model, "
-            "which is the constraint-mechanism 2x2 of audit C2. build_controller "
-            "currently couples the two: the Lagrangian runs whenever the policy learns "
-            "and the projection runs whenever barrier != 'none', so neither can be "
-            "switched off independently. Decoupling them is the work this arm names.")
-    if arm.comfort_barrier:
-        raise NotImplementedError(
-            f"arm {arm.name!r} is pre-registered, not implemented. Hard comfort (audit "
-            "C1) needs a thermal deadline barrier built on "
-            "stems.deadline.DeadlineStorageBarrier, with the soft reward penalty kept "
-            "as the comparison arm. Note that enforcing a hard band against CityLearn's "
-            "learned temperature model gives a constraint satisfied in simulation and "
-            "meaningless in reality (REPORT section 2); the claim belongs on an RC model "
-            "fitted to real data.")
-    if arm.degradation != "none":
-        raise NotImplementedError(
-            f"arm {arm.name!r} is pre-registered, not implemented. It asks for "
-            f"degradation={arm.degradation!r} (audit C1): throughput and depth-of-"
-            "discharge ageing wired as both a reward term and a constraint. Today "
-            "degradation is counted as the KPI battery_equivalent_full_cycles and "
-            "nothing acts on it.")
 
 
 #: Episode length used to record the perfect-foresight tape when the caller does not
@@ -585,17 +587,102 @@ def _build_mpc(arm: Arm, env, config, shield):
         p_grid_max=config.cbf.P_grid_max, p_building_max=config.cbf.P_building_max)
 
 
-def build_controller(arm: Arm, env, config):
+def mechanism_switches(arm: Arm) -> Tuple[bool, bool]:
+    """``(projection_on, lagrangian_on)`` for this arm. The 2x2 of audit C2.
+
+    ``mechanism="auto"`` reproduces the historical coupling exactly -- the projection
+    runs whenever ``barrier != "none"``, and the constrained-policy mechanism runs
+    whenever the policy learns -- so every pre-existing arm is bit-for-bit unchanged.
+    The four explicit values break that coupling, which is the whole point: today
+    ``rl`` has the Lagrangian and no barrier while ``rl+calibrated`` has both, so
+    neither isolates a mechanism.
+
+    A non-learning policy has no constrained-policy mechanism to switch, so
+    ``lagrangian_on`` is forced False for it rather than silently ignored.
+    """
+    learns = arm.learns
+    if arm.mechanism == "auto":
+        return arm.barrier != "none", learns
+    if arm.mechanism == "none":
+        return False, False
+    if arm.mechanism == "lagrangian":
+        if not learns:
+            raise ValueError(
+                f"arm {arm.name!r} asks for mechanism='lagrangian' with the "
+                f"non-learning policy {arm.policy!r}; there is no actor to constrain.")
+        return False, True
+    if arm.mechanism == "projection":
+        return True, False
+    if arm.mechanism == "both":
+        if not learns:
+            raise ValueError(
+                f"arm {arm.name!r} asks for mechanism='both' with the non-learning "
+                f"policy {arm.policy!r}; there is no actor to constrain.")
+        return True, True
+    raise ValueError(f"unknown mechanism {arm.mechanism!r}; choose from {MECHANISMS}")
+
+
+def comfort_barriers_for(arm: Arm, env, config, rc_model=None):
+    """The hard-comfort barriers for this arm, or ``[]``.
+
+    Kept OFF unless the arm asks for it. On CityLearn comfort stays the soft reward
+    term and no hard-comfort claim is made; see `stems/comfort.py` and CHANGELOG.md
+    step 1 of the constraints track for the measured reason.
+    """
+    if not arm.comfort_barrier:
+        return []
+    from stems.comfort import build_comfort_barriers
+
+    config.comfort.enabled = True
+    return build_comfort_barriers(env, config.comfort, rc=rc_model)
+
+
+def degradation_for(arm: Arm, env, config):
+    """The degradation model for this arm, or ``None``.
+
+    The arm names the *form* (``"throughput"`` / ``"throughput+dod"``); the price and
+    the per-episode capacity-loss budget are scenario properties and arrive through
+    ``config.degradation``. With no budget the channel is reported and not enforced,
+    which is where the literature stands (`stems/degradation.py`).
+    """
+    if arm.degradation == "none":
+        return None
+    from stems.degradation import DegradationModel
+
+    config.degradation.mode = arm.degradation
+    if arm.degradation == "throughput+dod" and config.degradation.dod_exponent == 0.0:
+        # p = 0 collapses the depth term onto the throughput term. Allowed, but the arm
+        # name would then claim an effect it does not apply, so say so loudly rather
+        # than let a run record carry the claim.
+        print("[STEMS] arm asks for degradation='throughput+dod' but "
+              "DegradationConfig.dod_exponent is 0.0, which reduces the depth-of-"
+              "discharge term to the throughput term exactly. Set a sourced exponent "
+              "or report this arm as throughput-only.")
+    return DegradationModel.from_environment(env, config.degradation)
+
+
+def build_controller(arm: Arm, env, config, rc_model=None):
     from stems.agent import STEMSAgent
     from stems.cbf import CBFShield
     from stems.graph import BuildingGraph
 
     _refuse_unimplemented(arm)
+    projection_on, lagrangian_on = mechanism_switches(arm)
 
     B = env.num_buildings
     safety, battery_model = safety_layer(arm.barrier, env)
     config.safety = safety
+    config.lagrangian.enabled = lagrangian_on
     battery = env.battery_info()
+    comfort = comfort_barriers_for(arm, env, config, rc_model=rc_model)
+    degradation = degradation_for(arm, env, config)
+    # The cost-critic width has to be settled *here*, after `degradation_for` has set
+    # the mode, and before the agent is constructed: the critics' output width is read
+    # off `num_constraints` at construction time, so deriving it later would build a
+    # three-output critic for a four-column cost array.
+    from stems.config import constraint_channel_names
+
+    config.lagrangian.num_constraints = len(constraint_channel_names(config))
 
     ev_indices = [] if env.using_mock else env.ev_action_indices()
 
@@ -617,7 +704,10 @@ def build_controller(arm: Arm, env, config):
                       ev_request=arm.ev_request)
 
     def fleet(barrier):
-        if not ev_indices or arm.barrier == "none":
+        # The fleet shield is a projection too, so it follows the projection switch and
+        # not just `barrier`: mechanism="none" and mechanism="lagrangian" must have no
+        # projection of any kind, or the 2x2 does not isolate anything.
+        if not ev_indices or arm.barrier == "none" or not projection_on:
             return None
         from stems.fleet import BaseLoadForecaster, FleetShield, HouseStorage
         from stems.observations import obs_index
@@ -643,12 +733,15 @@ def build_controller(arm: Arm, env, config):
         names = list(env.action_names)
         control = None if arm.control is None else [names.index(n) for n in arm.control]
         agent = STEMSAgent(env.obs_dim, env.action_dim, B, graph, config=config,
-                           battery_info=battery, use_cbf=arm.barrier != "none",
+                           battery_info=battery, use_cbf=projection_on,
                            electrical_storage_action_index=env.electrical_storage_action_index,
                            control_indices=control, hvac_action_index=env.hvac_action_index,
                            battery_model=battery_model or env.battery_model(),
+                           deadline_barriers=comfort or None,
                            base_policy=rule() if arm.residual else None)
         agent.fleet_shield = fleet(agent.cbf)
+        agent.degradation_model = degradation
+        agent.comfort_barriers = comfort
         if arm.ev_floor and ev_indices:
             agent.request_floor = ChargerFloor(env.action_dim, ev_indices[0],
                                                env.ev_obs_layout()[0], arm.ev_floor)
@@ -666,14 +759,20 @@ def build_controller(arm: Arm, env, config):
         base = SetpointShiftPolicy(env)
     else:
         raise ValueError(f"unknown policy {arm.policy!r}")
-    if arm.barrier == "none":
+    if not projection_on:
         controller = PlainController(base)
         if arm.policy == "hp-shift":
             controller.control_indices = [env.hvac_action_index]
+        controller.degradation_model = degradation
+        controller.comfort_barriers = comfort
         return controller
     shield = CBFShield(config.cbf, B, battery_model=battery_model,
                        nominal_power=battery["nominal_power"],
                        action_scale=config.training.action_scale,
                        elec_idx=env.electrical_storage_action_index,
-                       safety_cfg=safety, enforce_soc=True, hvac_idx=env.hvac_action_index)
-    return ShieldedController(base, shield, fleet_shield=fleet(shield))
+                       safety_cfg=safety, enforce_soc=True, hvac_idx=env.hvac_action_index,
+                       deadline_barriers=comfort or None)
+    controller = ShieldedController(base, shield, fleet_shield=fleet(shield))
+    controller.degradation_model = degradation
+    controller.comfort_barriers = comfort
+    return controller
