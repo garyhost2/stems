@@ -547,6 +547,43 @@ class STEMSEnvironment:
     def battery_info(self) -> Dict[str, np.ndarray]:
         return {k: v.copy() for k, v in self._battery_info.items()}
 
+    def battery_degradation_info(self) -> Dict[str, Any]:
+        """Capacity-fade parameters read off the simulator's own ``Battery`` objects.
+
+        ``capacity_loss_coefficient`` is CityLearn's ``kappa``: the fraction of rated
+        capacity lost per equivalent full cycle
+        (``citylearn/energy_model.py::Battery.degrade``). ``depth_of_discharge`` is the
+        maximum discharge fraction CityLearn itself enforces on the battery. Both are
+        reported with their source so a run record says where the numbers came from;
+        see ``stems/degradation.py``.
+        """
+        B = self._num_buildings
+        cap = np.asarray(self._battery_info["capacity"], dtype=np.float64).copy()
+        kappa = np.zeros(B, dtype=np.float64)
+        dod = np.ones(B, dtype=np.float64)
+        if self._mock:
+            kappa[:] = 1e-5
+            dod[:] = 1.0
+            source = ("mock environment: kappa set to the low end of CityLearn's "
+                      "documented (1e-5, 1e-4) default range")
+            dt = 3600.0
+        else:
+            missing = 0
+            for i, b in enumerate(self._env.buildings):
+                es = b.electrical_storage
+                k = getattr(es, "capacity_loss_coefficient", None)
+                if k is None:
+                    missing += 1
+                    k = 1e-5
+                kappa[i] = float(k)
+                dod[i] = float(getattr(es, "depth_of_discharge", 1.0) or 1.0)
+            source = ("citylearn.energy_model.Battery.capacity_loss_coefficient"
+                      + (f" ({missing}/{B} buildings fell back to 1e-5)" if missing
+                         else ""))
+            dt = float(self._env.seconds_per_time_step)
+        return {"capacity_loss_coefficient": kappa, "depth_of_discharge": dod,
+                "capacity": cap, "seconds_per_time_step": dt, "source": source}
+
     def battery_model(self):
         from stems.battery import BatteryModel
 

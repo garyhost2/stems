@@ -914,3 +914,109 @@ simulation-only status of the guarantee stays visible in the run record.
 asserts both keys are present and that the breach rate is a rate.
 
 ---
+
+## Step 2 — Battery and electric-vehicle degradation, priced and constrainable
+
+### 2.1 `stems/degradation.py`: capacity fade in kWh, with every parameter sourced
+
+**What.** `battery_equivalent_full_cycles` was a count the repository produced and never
+priced. It is now accompanied by a quantity with units — kWh of lost storage capacity —
+computed by `DegradationModel` and `DegradationAccountant` and reported next to it.
+
+Three terms, each with its source.
+
+**Throughput.** `ΔQ_thr,t = κ · Q_rated · |E_t| / (2 · Q_t)` [kWh]. This is
+*character-for-character the expression CityLearn itself applies*:
+`citylearn/energy_model.py::Battery.degrade` in 2.6.0b1 returns
+`capacity_loss_coefficient * capacity * abs(energy_balance[time_step]) / (2 *
+max(degraded_capacity, ZERO_DIVISION_PLACEHOLDER))`. Using it means the reward prices
+exactly what the plant does rather than a second, disagreeing model. `κ` is read per
+building off the simulator's own `Battery` objects through the new
+`STEMSEnvironment.battery_degradation_info()`. On `citylearn_schemas/tx_travis_8b` the
+eight values are `6.09e−5, 3.18e−5, 7.32e−5, 4.46e−5, 6.78e−5, 3.49e−5, 3.66e−5,
+9.08e−5` — inside CityLearn's own documented default range `(1e−5, 1e−4)` (same file,
+`Battery` docstring and the `capacity_loss_coefficient` setter). The factor two makes
+`κ` the fade per *equivalent full cycle*, one such cycle being `2 Q_rated` of
+throughput; a test checks that arithmetic directly. The same call also exposes
+`depth_of_discharge`, which on that schema is `0.9, 1.0, 0.85, 1.0, 1.0, 0.9, 0.9, 1.0`.
+
+**Depth of discharge.** Cycle life falls with cycle depth, so fade per unit of
+throughput rises with it. Writing `N(δ) = N_ref δ^−(p+1)` gives a multiplier `δ^p` on
+the throughput fade accumulated inside a closed half cycle. **`p` defaults to 0.0,
+which reproduces the throughput model exactly.** That default is deliberate: no value
+of `p` is asserted anywhere in this repository, because none was verified. The standard
+empirical reference for the shape is Xu, Oudalov, Ulbig, Andersson and Kirschen,
+"Modeling of Lithium-Ion Battery Degradation for Cell Life Assessment", IEEE
+Transactions on Smart Grid, DOI `10.1109/TSG.2016.2578950`. Its title and DOI resolved
+through Crossref; the paper is **closed access** (Unpaywall, Semantic Scholar and PMC
+all returned no open-access location) and **its fitted stress-function coefficients
+were not read**, so none are reproduced here. Setting `p` to a non-zero value is a
+modelling choice whoever sets it must source.
+
+**Calendar.** `ΔQ_cal,t = c_cal · Q_rated · dt`, `c_cal` in 1/s. No default: calendar
+fade depends on chemistry, temperature and mean state of charge, none of which the
+simulator reports. Off unless supplied.
+
+**Pricing.** `π_deg` [currency per kWh of lost capacity], default 0.0 — fade is
+measured and reported but does not enter the reward. A replacement cost is a market
+number belonging to the scenario, so it is a `Scenario` field
+(`degradation_price_per_kwh`), not a constant in the code. When set, the penalty is
+`π_deg · ΔQ_t`, in the same currency per kWh as the tariff, so the degradation cost and
+the electricity bill are additive.
+
+**Constraint.** The episode carries a per-building capacity-loss budget `L` [kWh]
+(`Scenario.degradation_limit_kwh_per_episode`). The per-step cost signal is
+`1{ΔQ_t > L / T}` for a `T`-step episode. That is the same per-step 0/1 indicator shape
+as the three existing channels, which is what lets the same cost critics carry it with
+no change to the critic, the generalised-advantage estimator or the multiplier update.
+
+### 2.2 Half cycles are closed by a hysteresis-filtered reversal detector
+
+**What.** The depth term needs a cycle depth. Rather than rainflow counting, which is
+not causal, the accountant tracks the state of charge at which the open excursion
+started and the extreme reached since; a retracement smaller than
+`reversal_threshold` (0.05 state-of-charge units, a repository choice, reported in every
+run record) does not close anything, and a larger one closes a half cycle of that depth.
+
+**Why, and this was found by measuring.** The first implementation closed a half cycle
+on every sign change. On a two-day winter window the policy's state of charge jitters
+every step, so it produced half cycles of mean depth `4.07e−4` — and with `p = 0.5`
+the `δ^p` multiplier then discounted the fade by about 98%. Without the range gate the
+depth term *rewards* jitter, which is the exact opposite of its purpose. The gate is
+the standard range filter applied ahead of rainflow counting. It is an approximation to
+rainflow, not rainflow, and a result that leans on `p > 0` should say so.
+
+### 2.3 Honest placement: this is ahead of the field, not a reproduction of it
+
+**What.** Stated here and in the module docstring rather than left for a reviewer to
+notice.
+
+**Why.** `docs/LITERATURE.md` records that in **every source the literature track
+retrieved**, degradation is a scored KPI and never an enforced constraint;
+[khouja2026characterizing] proposes "battery storage lifetime" explicitly as a *novel*
+KPI, which is itself evidence that it was neither standard nor enforced. Wiring it as a
+constraint is therefore a contribution to be defended, not a convention to be cited.
+`docs/LITERATURE.md` §8 also notes that battery degradation modelling was not searched
+as its own area, so the literature position above is provisional on that search.
+
+Separately: the audit's one citation for a vehicle-to-grid degradation term, **Khezri
+et al. 2024, did not resolve** against Crossref (`docs/LITERATURE.md` §8.1) and was
+struck. It is **not** cited in `stems/degradation.py`, in this changelog, or anywhere
+else in this track.
+
+**Evidence.** `tests/test_degradation.py`, 18 cases. The throughput term is checked
+against a local re-implementation of CityLearn's literal expression over a four-step
+state-of-charge path to `rtol=1e-12`; two full state-of-charge sweeps cost exactly `κ`
+of rated capacity to `rtol=2e-4`; `κ` read from an environment is asserted to lie in
+`(1e−5, 1e−4)` and to carry its CityLearn provenance string; `p = 0` reproduces the
+throughput total to `rtol=1e-9` over a 400-step random walk, which is also the proof
+that every unit of throughput is committed exactly once and the depth term cannot
+double-count; one 0.8-deep round trip costs strictly more than eight 0.1-deep round
+trips of the same total throughput at `p = 1`; the range gate holds a jittery 0.1→0.9
+climb to at most two closed half cycles instead of one per wiggle; calendar ageing
+charges `c_cal · Q_rated · dt` with no throughput at all; the price defaults to zero;
+the constraint channel is a `(B,)` 0/1 array; and the fade KPIs appear next to
+`battery_equivalent_full_cycles` in `MetricsCalculator.compute_all`. End-to-end:
+`tests/test_constraint_mechanisms.py::test_the_degradation_arm_runs_end_to_end_and_reports_fade`.
+
+---
