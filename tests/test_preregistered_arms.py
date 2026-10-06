@@ -54,12 +54,6 @@ IMPLEMENTED_BY_METHOD_TRACKS = IMPLEMENTED_BY_BASELINES_TRACK + IMPLEMENTED_BY_C
 ALL_PRE_REGISTERED: tuple = ()
 
 
-@pytest.mark.parametrize("name", ALL_PRE_REGISTERED)
-def test_the_name_is_registered(name):
-    assert name in ARMS, (
-        f"{name!r} is not in ARMS; a downstream track would hit a KeyError that reads "
-        "like a typo")
-    assert ARMS[name].name == name
 
 
 def test_nothing_remains_reserved():
@@ -74,6 +68,11 @@ def test_nothing_remains_reserved():
     """
     assert ALL_PRE_REGISTERED == ()
     assert tuple(PRE_REGISTERED_ARMS) == ()
+    # Absorbs test_the_name_is_registered, whose parameter set is now empty:
+    # pytest reports an empty parametrisation as a SKIP, which would read as
+    # coverage that silently never ran.
+    assert all(a.implemented for a in ARMS.values()), \
+        [n for n, a in ARMS.items() if not a.implemented]
 
 
 def test_the_pre_registered_set_is_exactly_what_we_declared():
